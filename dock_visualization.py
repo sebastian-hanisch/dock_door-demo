@@ -20,6 +20,20 @@ from dock_constants import FLOW_COLOR
 
 MAX_FLOWS_DRAWN = 40
 
+# Die y-Achse ist per scaleanchor fest im 1:1-Maßstab an die x-Achse gekoppelt
+# (kein Verzerren des Grundrisses) - vorher war die Canvas-Höhe unabhängig
+# davon immer 480px fest, was bei extremen Längen-/Tiefe-Verhältnissen zu viel
+# Leerraum (breite, flache Halle) oder einem winzig wirkenden Grundriss
+# (schmale, tiefe Halle) führte. Jetzt wird die Höhe aus dem tatsächlichen
+# Länge/Tiefe-Verhältnis der aktuellen Parameter abgeleitet, mit einer
+# angenommenen Canvas-Breite (unterschiedlich für volle Breite vs. die
+# nebeneinander stehenden Spalten im Methodenvergleich) und innerhalb
+# sinnvoller Grenzen gekappt.
+FULL_WIDTH_PX = 800
+HALF_WIDTH_PX = 380
+MIN_HEIGHT_PX = 260
+MAX_HEIGHT_PX = 700
+
 # Schwellenwerte für den mittleren Torabstand je Reihe (Meter), ab denen die
 # Beschriftung verkürzt bzw. ganz ausgeblendet wird.
 LABEL_SPACING_COMPACT = 18.0
@@ -66,13 +80,41 @@ def _label_plan(positions, hall_width):
     return "full"
 
 
-def build_hall_figure(positions, assignment, flow, hall_width, hall_depth, hot_lane_idxs=None):
+def _figure_height(hall_width, hall_depth, width_hint_px):
+    """Leitet eine zur Halle passende Canvas-Höhe ab, statt einer für alle
+    Längen-/Tiefe-Kombinationen fest gleichen Höhe: bei gegebener angenommener
+    Breite width_hint_px (voll oder halb, je nach Einbettung) ergibt sich die
+    Höhe aus dem tatsächlichen Seitenverhältnis von Länge zu Tiefe (inklusive
+    des +20 Randes, den die Achsenbereiche unten dazugeben), gekappt auf ein
+    lesbares Minimum/Maximum."""
+    x_range = hall_width + 20
+    y_range = hall_depth + 20
+    height = width_hint_px * (y_range / x_range)
+    return max(MIN_HEIGHT_PX, min(MAX_HEIGHT_PX, height))
+
+
+def build_hall_figure(positions, assignment, flow, hall_width, hall_depth, hot_lane_idxs=None, width_hint_px=FULL_WIDTH_PX):
     fig = go.Figure()
     n = len(positions)
 
     fig.add_shape(
         type="rect", x0=-5, y0=-5, x1=hall_width + 5, y1=hall_depth + 5,
         line=dict(color="#9ca3af", width=1), fillcolor="rgba(0,0,0,0)",
+    )
+
+    # Unsichtbare Eckpunkte statt eines fest vorgegebenen Achsenbereichs:
+    # Shapes (siehe oben) fließen nicht zuverlässig in Plotlys automatische
+    # Bereichsberechnung ein, Trace-Punkte schon. Damit deckt sich die
+    # Rahmung beim ersten Rendern exakt mit dem, was der "Autoscale"-Knopf in
+    # der Toolbar sowieso berechnet (der kennt die tatsächliche Canvas-Breite
+    # im Browser, ein vorher fest hinterlegter Achsenbereich konnte davon
+    # abweichen und wirkte dann - wie vom Nutzer beobachtet - schlechter
+    # gerahmt als ein Klick auf "Autoscale").
+    fig.add_trace(
+        go.Scatter(
+            x=[-10, hall_width + 10], y=[-10, hall_depth + 10],
+            mode="markers", marker=dict(opacity=0), hoverinfo="skip", showlegend=False,
+        )
     )
 
     if n > 0:
@@ -125,8 +167,8 @@ def build_hall_figure(positions, assignment, flow, hall_width, hall_depth, hot_l
                 )
 
     fig.update_layout(
-        xaxis=dict(range=[-10, hall_width + 10], title="Hallenlänge (m)", zeroline=False),
-        yaxis=dict(range=[-10, hall_depth + 10], title="Hallentiefe (m)", zeroline=False, scaleanchor="x"),
-        height=480, margin=dict(l=10, r=10, t=30, b=10),
+        xaxis=dict(autorange=True, title="Hallenlänge (m)", zeroline=False),
+        yaxis=dict(autorange=True, title="Hallentiefe (m)", zeroline=False, scaleanchor="x"),
+        height=_figure_height(hall_width, hall_depth, width_hint_px), margin=dict(l=10, r=10, t=30, b=10),
     )
     return fig

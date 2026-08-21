@@ -58,6 +58,10 @@ Modular wie bei den anderen Demos:
   Cross-Dock-Partner.
 - **Permalink, Feedback-Mechanismus, PDF-Export:** wie bei den anderen Demos, inklusive
   `SETTING_SPECS`-Muster und NaN/Infinity-Schutz von Anfang an.
+- **Mathematische Formulierung als eigener Expander:** formale QAP-Definition (Permutations-
+  und binäre Programmform), Herleitung der NP-Schwere über die Kopplung zweier
+  Zuordnungsvariablen im selben Term, mit direktem Bezug auf die entsprechenden Funktionen im
+  Code.
 
 ## Ein Konstruktionsfehler beim Bauen gefunden - vor Auslieferung durch Benchmarking behoben
 
@@ -88,6 +92,32 @@ hartkodiert immer "fluss-optimierte Tor-Zuordnung" als Gewinner, unabhängig dav
 beiden Methoden für das jeweilige Szenario tatsächlich besser abschnitt (`best['label']` wird
 jetzt korrekt eingesetzt statt eines festen Textes) - beim Testen mit dem ursprünglichen
 Default-Seed 42 sichtbar geworden, weil dort die Baseline gewann.
+
+## Visualisierung: zwei weitere Funde bei der Überarbeitung
+
+**Beschriftung mit hartkodierter Zahl statt Konstante.** Die Caption unter dem Hallengrundriss
+nannte an drei Stellen (Primäransicht, Detail-Panel je Heuristik, Methodenvergleich) leicht
+unterschiedlich formulierten Text - unter anderem "max. 40 dargestellt" als fest eingetippte
+Zahl, obwohl die tatsächliche Grenze über die Konstante `MAX_FLOWS_DRAWN` in
+`dock_visualization.py` gesteuert wird. Bei einer künftigen Änderung der Konstante wäre der
+Text stillschweigend falsch geworden. Fix: gemeinsame Caption-Bausteine
+(`HOT_LANE_CAPTION`, `FLOW_LINE_CAPTION`, `LABEL_DENSITY_CAPTION`), `FLOW_LINE_CAPTION` baut
+die Zahl direkt aus `MAX_FLOWS_DRAWN` zusammen. Regressionstest:
+`test_flow_line_caption_references_actual_constant_not_hardcoded_number`.
+
+**Canvas-Höhe und Achsenbereich passten sich nicht an die Hallenmaße an.** Ursprünglich war
+die Canvas-Höhe unabhängig von Hallenlänge/-tiefe immer fest 480px, bei extremen
+Seitenverhältnissen (z. B. 300 m × 10 m) entstand dadurch viel Leerraum. Erster Fix: Höhe wird
+aus dem tatsächlichen Längen-/Tiefen-Verhältnis abgeleitet (`_figure_height()`), gekappt auf
+260-700px, mit unterschiedlichem Breiten-Hint für volle Breite vs. die nebeneinander
+stehenden Grundrisse im Methodenvergleich. Vom Nutzer daraufhin gemeldet: der
+"Autoscale"-Knopf in der Plotly-Toolbar fand trotzdem noch eine bessere Darstellung als die
+Standardansicht - der fest vorgegebene Achsenbereich (`range=[...]`) basierte auf einer
+geschätzten Canvas-Breite, die von der tatsächlichen im Browser abweichen konnte. Zweiter Fix:
+`range` entfernt, `autorange=True` gesetzt, dazu zwei unsichtbare Eckpunkte als Trace (Shapes
+fließen nicht zuverlässig in die automatische Bereichsberechnung ein). Im Browser mit
+`Plotly.relayout()` verifiziert - derselbe Aufruf, den der Autoscale-Button intern macht -:
+Achsenbereich vorher/nachher identisch.
 
 ## Torgeometrie: zwei gegenüberliegende Reihen
 
@@ -127,7 +157,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-64 Tests, laufen automatisch bei jedem Push/PR über GitHub Actions.
+68 Tests, laufen automatisch bei jedem Push/PR über GitHub Actions.
 
 ## 3. Kostenlos online stellen (Streamlit Community Cloud)
 

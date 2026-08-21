@@ -27,7 +27,7 @@ from dock_heuristics import flow_greedy_assignment, sequential_assignment
 from dock_pdf_export import generate_assignment_plan_pdf
 from dock_presets import apply_preset, bounds, init_session_state_defaults, load_permalink_settings, randomize_seed, sync_query_params
 from dock_ui_panel import render_assignment_panel
-from dock_visualization import HOT_LANE_CAPTION, LABEL_DENSITY_CAPTION, build_hall_figure
+from dock_visualization import HALF_WIDTH_PX, HOT_LANE_CAPTION, LABEL_DENSITY_CAPTION, build_hall_figure
 
 st.set_page_config(page_title="Tor-Zuordnung Umschlaghalle – Sebastian Hanisch", layout="wide")
 
@@ -239,11 +239,15 @@ with st.expander("🔧 Wie wir das erreichen – vollständiger Methodenvergleic
         vis_col1, vis_col2 = st.columns(2)
         with vis_col1:
             st.markdown(f"**{summary_sequential['label']}**")
-            fig_compare_sequential = build_hall_figure(positions, assignment_sequential, flow, hall_width, hall_depth, hot_idxs)
+            fig_compare_sequential = build_hall_figure(
+                positions, assignment_sequential, flow, hall_width, hall_depth, hot_idxs, width_hint_px=HALF_WIDTH_PX,
+            )
             st.plotly_chart(fig_compare_sequential, width="stretch", key="compare_sequential_plot")
         with vis_col2:
             st.markdown(f"**{summary_greedy['label']}**")
-            fig_compare_greedy = build_hall_figure(positions, assignment_greedy, flow, hall_width, hall_depth, hot_idxs)
+            fig_compare_greedy = build_hall_figure(
+                positions, assignment_greedy, flow, hall_width, hall_depth, hot_idxs, width_hint_px=HALF_WIDTH_PX,
+            )
             st.plotly_chart(fig_compare_greedy, width="stretch", key="compare_greedy_plot")
         st.caption(
             "Gleiche Tor-Positionen und Flussmatrix in beiden Grundrissen - nur die Zuordnung von "
@@ -299,6 +303,63 @@ Liniennetz-Design-Demo gibt es hier keine strukturelle Garantie für jeden Einze
 bestimmte Fahrzeugtypen, Zeitfenster je Relation, mehrere Umschlaghallen-Formen statt der hier
 angenommenen zwei gegenüberliegenden Reihen) - das Grundprinzip aus Konstruktion und Bewertung
 bleibt aber dasselbe.
+"""
+    )
+
+with st.expander("📐 Mathematische Formulierung"):
+    st.markdown(
+        r"""
+Formal ist das Tor-Zuordnungsproblem ein **quadratisches Zuordnungsproblem** (QAP), das
+Koopmans & Beckmann 1957 ursprünglich für ein Standortproblem einführten. Gegeben:
+
+- eine Menge von $n$ **Relationen** $R = \{1, \ldots, n\}$
+- eine Menge von $n$ **Toren** $D = \{1, \ldots, n\}$
+- eine symmetrische **Flussmatrix** $f_{ij} \geq 0$: Umschlagvolumen (Bewegungen/Tag)
+  zwischen Relation $i$ und Relation $j$ (`flow` in `dock_data.py`)
+- eine symmetrische **Distanzmatrix** $d_{kl} \geq 0$: euklidische Distanz zwischen Tor
+  $k$ und Tor $l$ (`_pairwise_distances()` in `dock_heuristics.py`)
+
+Gesucht ist eine bijektive Zuordnung (Permutation) $\pi \in S_n$, die jeder Relation
+genau ein Tor zuweist und die flussgewichtete Gesamtdistanz minimiert:
+"""
+    )
+    st.latex(r"\min_{\pi \in S_n} \; \sum_{i=1}^{n} \sum_{j=1}^{n} f_{ij} \cdot d_{\pi(i)\pi(j)}")
+    st.markdown(
+        r"""
+Äquivalent als binäres quadratisches Programm mit Zuordnungsvariablen
+$x_{ik} \in \{0, 1\}$ (= 1, wenn Relation $i$ Tor $k$ zugewiesen wird) - die in der
+Literatur gebräuchlichere Form:
+"""
+    )
+    st.latex(
+        r"\min \; \sum_{i=1}^{n}\sum_{j=1}^{n}\sum_{k=1}^{n}\sum_{l=1}^{n} f_{ij}\, d_{kl}\, x_{ik}\, x_{jl}"
+    )
+    st.latex(
+        r"\text{u. d. N.} \quad \sum_{k=1}^{n} x_{ik} = 1 \;\; \forall i, "
+        r"\qquad \sum_{i=1}^{n} x_{ik} = 1 \;\; \forall k, \qquad x_{ik} \in \{0,1\}"
+    )
+    st.markdown(
+        r"""
+Die beiden Nebenbedingungen erzwingen genau das, was in der ersten (Permutations-)
+Formulierung schon durch die Wahl aus $S_n$ automatisch gilt: jede Relation bekommt
+genau ein Tor, jedes Tor genau eine Relation.
+
+**Warum "quadratisch"?** Die Zielfunktion enthält das *Produkt* $x_{ik} \cdot x_{jl}$
+zweier Entscheidungsvariablen, nicht wie beim einfacheren linearen Zuordnungsproblem
+(LAP) einen festen Koeffizienten pro Variable. Das LAP - "welche Relation bekommt
+welches Tor, wenn jede Kombination einen festen, unabhängigen Kostenwert hätte" - löst
+der Ungarische Algorithmus in Polynomialzeit exakt. Beim QAP hängt die Kosten-
+komponente $d_{kl}$ jeder Zuordnung aber selbst wieder von einer *zweiten*, gleichzeitig
+gesuchten Zuordnung ab ($x_{jl}$) - diese Kopplung zweier Variablen im selben Term macht
+das Problem NP-schwer (Sahni & Gonzalez 1976 zeigten zusätzlich: nicht einmal mit einer
+garantierten Gütegrenze effizient approximierbar, sofern P ≠ NP).
+
+**Bezug zum Code:** `evaluate_assignment()` in `dock_evaluation.py` berechnet exakt die
+obige Zielfunktion (als Summe über $i<j$ statt der vollen Doppelsumme, da $f_{ij}$
+symmetrisch ist - ergibt denselben Wert). Die beiden Heuristiken in
+`dock_heuristics.py` konstruieren jeweils eine zulässige Permutation $\pi$, ohne das
+Problem exakt zu lösen: bei $n=40$ Toren gäbe es $40! \approx 8 \times 10^{47}$
+mögliche Zuordnungen - vollständige Enumeration ist von vornherein ausgeschlossen.
 """
     )
 

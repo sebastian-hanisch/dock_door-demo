@@ -42,6 +42,13 @@ def test_default_load():
     assert_ok(at)
 
 
+def test_math_formulation_expander_present_and_renders():
+    at = fresh_app()
+    assert_ok(at)
+    expander_labels = [e.label for e in at.expander]
+    assert any("Mathematische Formulierung" in label for label in expander_labels)
+
+
 def test_primary_view_shows_two_metrics():
     at = fresh_app()
     assert_ok(at)
@@ -417,6 +424,39 @@ def test_build_hall_figure_handles_zero_and_one_door():
         assignment = sequential_assignment(positions, flow)
         fig = build_hall_figure(positions, assignment, flow, hall_width=100.0, hall_depth=30.0, hot_lane_idxs=hots)
         assert len(fig.layout.annotations) <= n
+
+
+def test_figure_height_adapts_to_hall_aspect_ratio():
+    """Regressionstest: die Canvas-Höhe war zuvor unabhängig vom Länge/Tiefe-
+    Verhältnis der Halle immer fest 480px - eine breite, flache Halle bekommt
+    jetzt eine spürbar geringere Höhe als eine schmale, tiefe."""
+    from dock_visualization import _figure_height
+
+    wide_shallow = _figure_height(hall_width=300.0, hall_depth=10.0, width_hint_px=800)
+    default_ish = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=800)
+    narrow_deep = _figure_height(hall_width=30.0, hall_depth=100.0, width_hint_px=800)
+    assert wide_shallow < default_ish < narrow_deep
+
+
+def test_figure_height_stays_within_bounds():
+    from dock_visualization import MAX_HEIGHT_PX, MIN_HEIGHT_PX, _figure_height
+
+    very_flat = _figure_height(hall_width=300.0, hall_depth=10.0, width_hint_px=800)
+    very_tall = _figure_height(hall_width=30.0, hall_depth=100.0, width_hint_px=800)
+    assert MIN_HEIGHT_PX <= very_flat <= MAX_HEIGHT_PX
+    assert MIN_HEIGHT_PX <= very_tall <= MAX_HEIGHT_PX
+
+
+def test_figure_height_smaller_width_hint_gives_smaller_height():
+    """Die Vergleichsansicht rendert zwei Grundrisse nebeneinander (halbe
+    Breite) - bei gleichem Hallen-Seitenverhältnis muss der width_hint_px-
+    Parameter das direkt in eine kleinere Höhe übersetzen, sonst wäre der
+    Halb-Spalten-Grundriss unnötig hoch/gestaucht."""
+    from dock_visualization import HALF_WIDTH_PX, _figure_height
+
+    full = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=800)
+    half = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=HALF_WIDTH_PX)
+    assert half < full
 
 
 def test_flow_line_caption_references_actual_constant_not_hardcoded_number():
