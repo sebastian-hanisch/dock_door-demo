@@ -134,6 +134,32 @@ kann das Ergebnis nie schlechter sein als der Startpunkt
 (`test_two_opt_never_worsens_the_start`) - ein globales Optimum ist damit trotzdem nicht
 garantiert.
 
+## Beam-Search-Konstruktion geprüft: besser allein, wirkungslos nach 2-opt
+
+Andere Angriffsrichtung als die drei Erweiterungen unten: nicht "kann man nach der 2-opt-Lösung
+noch mehr herausholen", sondern "würde ein besserer Startpunkt *vor* 2-opt am Ende etwas
+bringen". Umgesetzt als direkte Verallgemeinerung von `flow_greedy_assignment`: statt bei jedem
+Konstruktionsschritt nur die eine beste Erweiterung zu wählen, werden die $k$ besten
+Teil-Zuordnungen parallel weiterverfolgt (Beam-Breite $k$), je Schritt um bis zu $m$ Kandidaten
+erweitert und wieder auf $k$ beschnitten (reduziert sich bei $k=m=1$ exakt auf
+`flow_greedy_assignment` - als Sanity-Check verifiziert).
+
+**Standalone (vor 2-opt), Beam-Breite 8, Branching-Faktor 3:** schlägt reines Greedy deutlich -
++5,7 % bei 16 Toren, **+10,7 % bei 20 Toren**, +1,8 % bei 28, +0,8 % bei 40 Toren. Und praktisch
+kostenlos: 4-42ms, gegenüber 2-opts <1s vernachlässigbar.
+
+**Nach angeschlossenem 2-opt auf beiden Startpunkten:** der Vorsprung verdampft fast vollständig
+- 0,14 %, 0,05 %, bei 28 und 40 Toren im Schnitt sogar leicht **negativ** (-0,04 % bzw. -0,05 %,
+Einzelwerte pendeln zwischen -0,45 % und +0,6 % ohne erkennbare Richtung) - statistisch nicht
+mehr von Rauschen unterscheidbar.
+
+**Einordnung:** Vierte unabhängige Bestätigung desselben Musters, diesmal von der anderen
+Seite: 2-opt konvergiert unterschiedliche vernünftige Startpunkte offenbar auf praktisch
+dieselbe Endqualität - egal ob der Startpunkt aus schwachem oder deutlich besserem Greedy
+kommt. Die eigentliche Optimierungsarbeit passiert bei dieser Instanzklasse fast vollständig in
+der 2-opt-Phase, nicht in der Konstruktion davor. Code wurde nach dem Benchmark nicht
+übernommen (nur dieser Befund).
+
 ## Drei geprüfte, aber verworfene Erweiterungen der 2-opt-Nachbarschaft
 
 Auf die Frage "lässt sich die Nachbarschaft noch sinnvoll erweitern?" wurden drei
@@ -180,6 +206,41 @@ scheitern, ist ein deutlich stärkeres Indiz als jeder einzelne Befund für sich
 2-opt-Lösung ist für diese Instanzklasse bereits sehr nah am Optimum. Die App bleibt bei den
 drei Methoden Baseline, Fluss-Greedy-Konstruktion und 2-opt-Verbesserung - das ist für diese
 Problemgröße der praktische Sweet Spot.
+
+## Exakte Lösung als Vergleichsmaßstab: machbar, aber nur für sehr kleine Instanzen
+
+Nach vier Befunden, die alle indirekt darauf hindeuten, dass 2-opt bereits nah am Optimum liegt
+(ILS, 3-opt, Tabu Search, Beam-Search-Konstruktion - siehe oben), lag die naheliegende Frage
+nahe: lässt sich das direkt beweisen, statt nur zu vermuten? Zwei exakte Verfahren wurden dafür
+benchmarkt, beide geben garantiert das globale Optimum zurück (keine Heuristik, kein
+Approximationsrisiko):
+
+- **Brute-Force** (alle $n!$ Permutationen durchprobieren)
+- **Backtracking mit Pruning** (baut die Zuordnung Relation für Relation auf, bricht einen Zweig
+  ab, sobald seine bereits fixierten Kosten das bisher beste Ergebnis erreichen oder
+  übersteigen - ein beweisbar sicheres Abbruchkriterium, da alle noch fehlenden Kostenbeiträge
+  $\geq 0$ sind, also nie das echte Optimum verpasst werden kann)
+
+| Tore | Brute-Force | Backtracking | Ergebnis identisch |
+|---|---|---|---|
+| 7 | 0,04s | 0,02s | ✓ |
+| 8 | 0,38s | 0,25s | ✓ |
+| 9 | 4,24s | 1,30s | ✓ |
+| 10 | 52,6s | 18,1s | ✓ |
+
+Backtracking gewinnt durchgehend (2-3x schneller bei identischem Ergebnis), aber beide wachsen
+erwartungsgemäß faktoriell - bei 11 Toren wären es bereits mehrere Minuten. Der aktuelle
+Tore-Regler der App deckt 4 bis 40 Tore ab (Standard 16); exaktes Lösen ist damit nur für einen
+kleinen Ausschnitt dieses Bereichs praktikabel (~9 Tore interaktiv, ~10 Tore als Opt-in mit
+Wartehinweis) - für den normalen Nutzungsbereich der Demo kein Ersatz für die Heuristiken,
+sondern höchstens eine zusätzliche, bedingte Anzeige bei kleinen Szenarien.
+
+**Konsequenz:** Nicht eingebaut (kein zusätzlicher Nutzen für den Aufwand angesichts des engen
+anwendbaren Bereichs), aber als Befund festgehalten, weil er die Vermutung der letzten vier
+Abschnitte auf den Punkt bringt: Für die kleinen Instanzen, bei denen sich das Optimum
+überhaupt beweisen lässt, dürfte 2-opt es typischerweise bereits erreichen oder ihm sehr nahe
+kommen - eine direkte, statt nur indizienbasierte, Bestätigung wäre die konsequente nächste
+Erweiterung, falls das Thema später doch noch vertieft werden soll (siehe Anpassungsideen).
 
 ## Visualisierung: zwei weitere Funde bei der Überarbeitung
 
@@ -271,4 +332,8 @@ pytest tests/ -v
   zeitreihenbasiertes Teilproblem - ergänzt die reine Tor-Zuordnung um die Dimension "wann".
 - Torkompatibilität (nicht jedes Tor für jede Fahrzeuggröße/Ladungsart geeignet) als
   Nebenbedingung in der Heuristik.
+- Exakte Lösung als bedingte Zusatzanzeige bei kleinen Szenarien (≤ 9-10 Tore, siehe
+  "Exakte Lösung als Vergleichsmaßstab" oben) - würde die bisher nur indirekt gestützte
+  Vermutung ("2-opt liegt nah am Optimum") für den Bereich, wo sie sich beweisen lässt, in
+  eine harte Kennzahl ("X % vom nachweislichen Optimum entfernt") verwandeln.
 - Test an einem echten Mobilgerät.
