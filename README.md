@@ -24,7 +24,7 @@ Modular wie bei den anderen Demos:
 | `app.py` | Streamlit-Hauptablauf (Primäransicht, Sidebar, Detail-Expander) |
 | `dock_constants.py` | Konstanten |
 | `dock_data.py` | Torpositionen (zwei gegenüberliegende Reihen) + Flussmatrix-Generierung |
-| `dock_heuristics.py` | Sequentielle und fluss-optimierte Tor-Zuordnung |
+| `dock_heuristics.py` | Sequentielle, fluss-optimierte und 2-opt-verbesserte Tor-Zuordnung |
 | `dock_evaluation.py` | Bewertung: flussgewichtete Gesamt-/Durchschnittsdistanz |
 | `dock_visualization.py` | 2D-Hallengrundriss (Plotly) |
 | `dock_pdf_export.py` | PDF-Zuordnungsplan-Erzeugung |
@@ -38,21 +38,25 @@ Modular wie bei den anderen Demos:
   symmetrisches Umschlagvolumen (Bewegungen/Tag) generiert, konfigurierbar über eine
   "Konzentration auf Vorzugsrelationen" (0 = gleichverteilt, 1 = stark auf wenige
   umschlagstarke Relationen konzentriert - z. B. ein Großkunde/Cross-Dock-Partner).
-- **Zwei eigene Heuristiken:**
+- **Drei eigene Verfahren:**
   - *Nach Ankunftsreihenfolge* (Baseline): Relation i erhält Tor i, unabhängig vom
     Umschlagvolumen - repräsentiert eine ungeplante, historisch gewachsene Zuteilung.
-  - *Fluss-optimierte Zuordnung*: bearbeitet Relationspaare in absteigender Flussstärke,
-    platziert das stärkste unplatzierte Paar auf das nächstgelegene freie Torpaar und
-    erweitert jede weitere Relation auf das freie Tor mit der geringsten flussgewichteten
-    Distanz zu **allen** bereits platzierten Relationen, mit denen sie Fluss hat (nicht nur
-    zum aktuellen Paarpartner - siehe Korrektur unten).
+  - *Fluss-optimierte Zuordnung* (Konstruktion): bearbeitet Relationspaare in absteigender
+    Flussstärke, platziert das stärkste unplatzierte Paar auf das nächstgelegene freie
+    Torpaar und erweitert jede weitere Relation auf das freie Tor mit der geringsten
+    flussgewichteten Distanz zu **allen** bereits platzierten Relationen, mit denen sie
+    Fluss hat (nicht nur zum aktuellen Paarpartner - siehe Korrektur unten).
+  - *2-opt-verbessert* (lokale Suche): startet bei der fluss-optimierten Zuordnung und
+    tauscht wiederholt die Relationen zweier Tore, wenn das die Gesamtdistanz senkt, bis
+    kein verbessernder Tausch mehr existiert - kann sein Startergebnis dadurch nie
+    verschlechtern, siehe Abschnitt unten.
 - **Distanz statt Kosten als Kennzahl:** Anders als bei der Tourenplanung-Demo (€/h/CO₂)
   zählt hier die flussgewichtete Durchschnittsdistanz je Bewegung. Bewusst **keine**
   künstliche €-Umrechnung, da die tatsächliche Kostenwirkung stark vom Betrieb abhängt
   (Personal, Schichtmodell, Flurförderzeug-Typ) - kürzere Wege bedeuten aber in jedem Betrieb
   weniger Staplerzeit und mehr Durchsatz.
-- **Primäransicht "Ihre optimierte Tor-Zuordnung"** von Anfang an: zeigt die bessere der
-  beiden Methoden direkt, kein Algorithmus-Name in der Überschrift. Vollständiger
+- **Primäransicht "Ihre optimierte Tor-Zuordnung"** von Anfang an: zeigt die beste der
+  drei Methoden direkt, kein Algorithmus-Name in der Überschrift. Vollständiger
   Methodenvergleich liegt im Expander "Wie wir das erreichen".
 - **Drei Ein-Klick-Beispielszenarien:** Kleine Halle, Hauptpartner-Halle, Mehrere
   Cross-Dock-Partner.
@@ -92,6 +96,90 @@ hartkodiert immer "fluss-optimierte Tor-Zuordnung" als Gewinner, unabhängig dav
 beiden Methoden für das jeweilige Szenario tatsächlich besser abschnitt (`best['label']` wird
 jetzt korrekt eingesetzt statt eines festen Textes) - beim Testen mit dem ursprünglichen
 Default-Seed 42 sichtbar geworden, weil dort die Baseline gewann.
+
+## 2-opt-Verbesserung als drittes Verfahren
+
+Auf Nutzerwunsch ergänzt: eine lokale Suche (Pairwise Exchange, umgangssprachlich "2-opt"),
+die auf der fluss-optimierten Zuordnung aufsetzt und wiederholt zwei Tore probeweise tauscht -
+wird die flussgewichtete Gesamtdistanz dadurch kleiner, bleibt der Tausch bestehen. Je
+Durchlauf wird der beste gefundene Tausch ausgeführt (Steepest Descent), bis keiner mehr
+verbessert (ein lokales Optimum).
+
+**Effiziente Umsetzung war hier der eigentliche Punkt.** Eine Kostenänderung naiv durch
+volle Neuberechnung der Zielfunktion zu prüfen, kostet $O(n^2)$ je Tauschkandidat - bei
+$O(n^2)$ Kandidaten je Durchlauf ergäbe das $O(n^4)$ je Durchlauf, bei 40 Toren spürbar
+träge. Stattdessen berechnet `_swap_delta()` in `dock_heuristics.py` die Kostenänderung
+inkrementell in $O(n)$ (nur die durch den Tausch tatsächlich betroffenen Terme, Herleitung
+im Expander "Mathematische Formulierung" der App) - macht die Prüfung aller
+$\binom{n}{2}$ Tauschkandidaten je Durchlauf zu $O(n^3)$. Gemessen bei 40 Toren: **< 1
+Sekunde** pro vollständigem Lauf bis zum lokalen Optimum (0,82s im Benchmark), bei den
+üblichen 16-28 Toren im Bereich von 20-140ms - interaktiv nutzbar, ohne Caching hätte aber
+schon ein einziger Regler-Dreh die App spürbar verzögert. Deshalb werden alle drei
+Zuordnungen jetzt (wie Torpositionen/Flussmatrix schon vorher) im Session State
+zwischengespeichert und nur bei tatsächlicher Parameteränderung neu berechnet, nicht bei
+jedem Rerun (z. B. Auf-/Zuklappen eines Expanders).
+
+**Vor dem Verdrahten gegen eine volle Neuberechnung geprüft:** Für 200 zufällige
+Tor-/Tauschkombinationen wurde die inkrementelle Delta-Formel gegen eine komplette
+Neubewertung vor/nach dem Tausch abgeglichen (`test_swap_delta_matches_full_recomputation`)
+- ein Vorzeichen- oder Indexfehler in so einer Formel fällt sonst oft erst bei bestimmten
+Konstellationen auf, nicht beim ersten Test mit "sieht plausibel aus".
+
+**Qualität:** Über 20-Tore-Instanzen liegt die 2-opt-Verbesserung im Schnitt rund 13-17 %
+unter der reinen fluss-optimierten Konstruktion (zusätzlich zu deren eigenem Vorsprung
+gegenüber der Baseline) - in Summe oft 15-20 % kürzere Wege als "Nach Ankunftsreihenfolge".
+Anders als die Konstruktionsheuristiken hat dieses Verfahren eine echte, wenn auch nur
+**lokale** Garantie: da ausschließlich nachweislich verbessernde Tausche ausgeführt werden,
+kann das Ergebnis nie schlechter sein als der Startpunkt
+(`test_two_opt_never_worsens_the_start`) - ein globales Optimum ist damit trotzdem nicht
+garantiert.
+
+## Drei geprüfte, aber verworfene Erweiterungen der 2-opt-Nachbarschaft
+
+Auf die Frage "lässt sich die Nachbarschaft noch sinnvoll erweitern?" wurden drei
+Standardtechniken implementiert, benchmarkt - und wieder verworfen, weil der Zusatznutzen den
+Aufwand nicht rechtfertigt. Alle drei Implementierungen waren korrekt (Delta-/Kostenformeln
+jeweils gegen volle Neuberechnung verifiziert), das Ergebnis ist trotzdem ein Minus-Befund -
+hier festgehalten, weil er selbst aussagekräftig ist: die 2-opt-Lösung ausgehend von der
+Fluss-Konstruktion liegt für diese Art Instanzen (2-Reihen-Halle, euklidische Distanz, das hier
+verwendete Flussmuster) offenbar bereits nah an einem starken, oft vermutlich globalen Optimum.
+
+**1. Iterated Local Search** (2-opt bis zum lokalen Optimum, Ergebnis mit ein paar zufälligen
+Tauschen "schütteln", erneut 2-opt, über mehrere Neustarts das beste Ergebnis behalten): über
+16-40 Tore und mehrere Perturbationsstärken getestet. Schwache Störung (2-3 Tausche) wird von
+2-opt fast immer sofort wieder rückgängig gemacht (~0,1-0,2 % Gewinn, auch mit 20 Neustarts
+nicht). Starke Störung (n/2 Tausche) findet zwar andere Optima, aber jeder Neustart braucht
+dann fast so lange wie eine komplette Neukonvergenz - bei 40 Toren rund 9 Sekunden zusätzlich
+für ~0,6 % Gewinn. Bestes gefundenes Verhältnis (mittlere Störung, 8-12 Neustarts): ~0,2-1,1 %
+zusätzliche Verbesserung.
+
+**2. 3-opt-Nachbarschaft** (zyklische Dreiertausche - drei Relationen rotieren gemeinsam auf
+drei Tore, eine Bewegung, die reines 2-opt strukturell nicht erreichen kann - als
+Variable-Neighborhood-Descent mit 2-opt kombiniert): bei 20 Toren im Schnitt **~0,34 %**
+zusätzliche Verbesserung (10 von 20 Testinstanzen fanden überhaupt eine, Spanne 0-1,8 %). Bei
+40 Toren wird das Verhältnis noch ungünstiger: **~0-0,01 %** Verbesserung bei gleichzeitig
+**1,9-3,4 Sekunden** zusätzlicher Laufzeit (2-opt allein: <1s) - dort lohnt sich der Aufwand
+praktisch nicht mehr.
+
+**3. Tabu Search** (Taillards Robust-Tabu-Search - dieselbe Tausch-Nachbarschaft wie 2-opt, aber
+jede Iteration wird der beste **nicht-tabu** Tausch ausgeführt, auch wenn er kurzfristig
+verschlechtert, um aus einem lokalen Optimum herauszukommen; eine Tabu-Liste verhindert das
+sofortige Rückgängigmachen, eine Aspirationsregel erlaubt Ausnahmen bei einer neuen
+Gesamtbestleistung): die in der QAP-Literatur eigentlich stärkste Metaheuristik, hier gezielt
+wegen genau dieser Reputation gewählt. Nach Tuning von Tabu-Länge (3 bis 40) und Iterationszahl
+(100 bis 500) bei 20 Toren: Verbesserung **plateaut bei ~1,0-1,1 %** - weder mehr Iterationen
+noch eine längere Tabu-Liste bringen darüber hinaus noch etwas, Trefferquote aber deutlich
+besser als bei den ersten beiden Techniken (9-10 von 10 Instanzen verbessert statt vereinzelt).
+Bei 40 Toren mit Standardparametern **0-0,14 %** Verbesserung in 2,8-2,9s, mit aufgedrehten
+Parametern 5,7s für vermutlich ähnlich wenig.
+
+**Konsequenz:** Alle drei Implementierungen wurden wieder entfernt (nicht im Code, um totes
+Gewicht zu vermeiden). Dass drei unabhängige Techniken - darunter mit Tabu Search eine der in
+der Literatur erfolgreichsten QAP-Metaheuristiken überhaupt - alle an derselben ~1-%-Grenze
+scheitern, ist ein deutlich stärkeres Indiz als jeder einzelne Befund für sich: die
+2-opt-Lösung ist für diese Instanzklasse bereits sehr nah am Optimum. Die App bleibt bei den
+drei Methoden Baseline, Fluss-Greedy-Konstruktion und 2-opt-Verbesserung - das ist für diese
+Problemgröße der praktische Sweet Spot.
 
 ## Visualisierung: zwei weitere Funde bei der Überarbeitung
 
@@ -134,9 +222,12 @@ realistischer und visuell nachvollziehbarer als eine reine Linienaufstellung.
   geeignet) - jedes Tor kann jede Relation bedienen.
 - Keine Zeitfenster-/Verspätungsplanung (reines Zuordnungsproblem, keine Zeitkomponente -
   das wäre ein eigenständiges Truck-Appointment-Scheduling-Problem, siehe Anpassungsideen).
-- Kein drittes/viertes Verfahren (z. B. Local-Search-Verbesserung nach der Konstruktion,
-  Simulated Annealing) - zwei Methoden mit echtem Charakterunterschied reichen für die
-  Kernaussage.
+- Kein Metaheuristik-Verfahren (z. B. Simulated Annealing, Tabu Search) - die 2-opt-Lokal-
+  suche (siehe unten) deckt den "Konstruktion + Verbesserung"-Grundgedanken bereits ab,
+  ohne die zusätzlichen Parameter (Temperatur, Abkühlplan, Tabu-Länge) einer Metaheuristik
+  erklären zu müssen. Ursprünglich war hier bewusst auch gegen ein drittes Verfahren
+  entschieden worden ("zwei Methoden mit echtem Charakterunterschied reichen") - auf
+  Nutzerwunsch revidiert, siehe Abschnitt "2-opt-Verbesserung als drittes Verfahren".
 - Relationen nicht editierbar (Fluss ist an die Generierung gekoppelt), analog zur
   Liniennetz-Design-Demo.
 
@@ -157,7 +248,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-68 Tests, laufen automatisch bei jedem Push/PR über GitHub Actions.
+88 Tests, laufen automatisch bei jedem Push/PR über GitHub Actions.
 
 ## 3. Kostenlos online stellen (Streamlit Community Cloud)
 

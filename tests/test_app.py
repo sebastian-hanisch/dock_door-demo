@@ -69,7 +69,7 @@ def test_primary_view_method_attribution_in_caption():
     at = fresh_app()
     assert_ok(at)
     captions = [str(c.value) for c in at.caption]
-    assert any("zwei eigenen Methoden" in c for c in captions)
+    assert any("drei eigenen Methoden" in c for c in captions)
 
 
 @pytest.mark.parametrize("label", ["Kleine Halle", "Hauptpartner-Halle", "Mehrere Cross-Dock-Partner"])
@@ -110,7 +110,7 @@ def test_pdf_download_buttons_present():
     at = fresh_app()
     assert_ok(at)
     labels = [d.label for d in at.download_button]
-    assert len(labels) == 3  # Primäransicht + Ankunftsreihenfolge + Fluss-optimiert
+    assert len(labels) == 4  # Primäransicht + Ankunftsreihenfolge + Fluss-optimiert + 2-opt-verbessert
     assert all("PDF" in l for l in labels)
 
 
@@ -122,7 +122,7 @@ def test_feedback_buttons_work():
     assert any("Danke" in str(s.value) for s in at.success)
 
 
-def test_comparison_tab_has_both_methods():
+def test_comparison_tab_has_all_three_methods():
     at = fresh_app()
     assert_ok(at)
     comparison_dfs = [d for d in at.dataframe if "Methode" in d.value.columns]
@@ -130,6 +130,7 @@ def test_comparison_tab_has_both_methods():
     methods = comparison_dfs[0].value["Methode"].tolist()
     assert "Nach Ankunftsreihenfolge" in methods
     assert "Fluss-optimiert" in methods
+    assert "2-opt-verbessert" in methods
 
 
 def test_permalink_writes_and_restores():
@@ -196,7 +197,7 @@ def test_permalink_url_params_are_unique():
 
 from dock_data import generate_doors_and_flow
 from dock_evaluation import evaluate_assignment, lane_flow_totals
-from dock_heuristics import flow_greedy_assignment, sequential_assignment
+from dock_heuristics import _pairwise_distances, _swap_delta, flow_greedy_assignment, sequential_assignment, two_opt_improvement
 
 
 def test_generate_doors_and_flow_shapes_and_symmetry():
@@ -352,6 +353,107 @@ def test_flow_greedy_all_zero_flow_falls_back_to_valid_permutation():
     flow = np.zeros_like(flow)
     assignment = flow_greedy_assignment(positions, flow)
     _validate_permutation(assignment, 10)
+
+
+# --- 2-opt-Verbesserung ---
+
+def test_swap_delta_matches_full_recomputation():
+    """Kernkorrektheitstest der inkrementellen Delta-Formel: für viele
+    zufällige Instanzen und Tauschkandidaten muss die vorhergesagte
+    Kostenänderung exakt mit einer vollständigen Neuberechnung vor/nach dem
+    Tausch übereinstimmen. Ein Vorzeichen- oder Indexfehler in dieser Formel
+    würde sonst nur bei bestimmten Konstellationen auffallen."""
+    rng = np.random.default_rng(0)
+    for trial in range(50):
+        n = int(rng.integers(2, 10))
+        positions, flow, hots = generate_doors_and_flow(n, seed=trial, flow_concentration=0.5, n_hot_lanes=2)
+        assignment = rng.permutation(n)
+        door_dist = _pairwise_distances(positions)
+        a, b = sorted(int(x) for x in rng.choice(n, size=2, replace=False))
+
+        cost_before = evaluate_assignment(assignment, positions, flow)["total_weighted_distance"]
+        predicted_delta = _swap_delta(assignment, flow, door_dist, a, b)
+
+        swapped = assignment.copy()
+        swapped[a], swapped[b] = swapped[b], swapped[a]
+        cost_after = evaluate_assignment(swapped, positions, flow)["total_weighted_distance"]
+
+        assert predicted_delta == pytest.approx(cost_after - cost_before, abs=1e-6)
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+def test_two_opt_produces_valid_permutation(seed):
+    positions, flow, hots = generate_doors_and_flow(20, seed=seed, flow_concentration=0.6, n_hot_lanes=2)
+    start = flow_greedy_assignment(positions, flow)
+    improved = two_opt_improvement(positions, flow, start)
+    _validate_permutation(improved, 20)
+
+
+@pytest.mark.parametrize("seed", range(1, 11))
+def test_two_opt_never_worsens_the_start(seed):
+    """Die zentrale Garantie der 2-opt-Verbesserung (anders als bei den
+    Konstruktionsheuristiken, die im Schnitt, aber nicht garantiert besser
+    sind): da nur nachweislich verbessernde Tausche ausgeführt werden, darf
+    das Ergebnis nie schlechter sein als der Startpunkt."""
+    positions, flow, hots = generate_doors_and_flow(20, seed=seed, flow_concentration=0.6, n_hot_lanes=2)
+    start = flow_greedy_assignment(positions, flow)
+    improved = two_opt_improvement(positions, flow, start)
+    cost_start = evaluate_assignment(start, positions, flow)["total_weighted_distance"]
+    cost_improved = evaluate_assignment(improved, positions, flow)["total_weighted_distance"]
+    assert cost_improved <= cost_start + 1e-6
+
+
+def test_two_opt_actually_improves_a_hand_constructed_case():
+    """Handkonstruierter Fall mit einer eindeutig verbessernden Vertauschung:
+    Relation 0 und 1 haben starken Fluss, sitzen aber (bewusst suboptimal)
+    an weit entfernten Toren; 2-opt muss das erkennen und tauschen. Tor 0/1
+    liegen näher beieinander (Distanz 1) als Tor 2/3 (Distanz 10), damit das
+    beste Torpaar für die starke Relation eindeutig ist (keine symmetrische
+    Alternative mit gleichen Kosten)."""
+    positions = np.array([[0.0, 0.0], [1.0, 0.0], [1000.0, 0.0], [1010.0, 0.0]])
+    flow = np.zeros((4, 4))
+    flow[0][1] = flow[1][0] = 100
+    start = np.array([0, 2, 3, 1])  # Relation 0 an Tor 0, Relation 1 an Tor 3 - weit auseinander
+
+    improved = two_opt_improvement(positions, flow, start)
+    door_of_lane = {lane: door for door, lane in enumerate(improved)}
+    assert {door_of_lane[0], door_of_lane[1]} == {0, 1}
+
+    cost_start = evaluate_assignment(start, positions, flow)["total_weighted_distance"]
+    cost_improved = evaluate_assignment(improved, positions, flow)["total_weighted_distance"]
+    assert cost_improved < cost_start
+
+
+def test_two_opt_is_idempotent_at_a_local_optimum():
+    """Ein bereits lokal optimales Ergebnis darf durch einen erneuten Lauf
+    nicht mehr verändert werden - sonst wäre die Abbruchbedingung fehlerhaft."""
+    positions, flow, hots = generate_doors_and_flow(15, seed=3, flow_concentration=0.6, n_hot_lanes=2)
+    once = two_opt_improvement(positions, flow, flow_greedy_assignment(positions, flow))
+    twice = two_opt_improvement(positions, flow, once)
+    assert list(once) == list(twice)
+
+
+def test_two_opt_beats_greedy_alone_on_average(seed_range=range(1, 6)):
+    """Qualitäts-Sanity-Check analog zu test_flow_greedy_beats_sequential_on_
+    average: die 2-opt-Verbesserung soll im Schnitt spürbar über die reine
+    Konstruktion hinauskommen - das ist ihr eigentlicher Daseinszweck."""
+    deltas = []
+    for seed in seed_range:
+        positions, flow, hots = generate_doors_and_flow(20, seed=seed, flow_concentration=0.6, n_hot_lanes=2)
+        greedy = flow_greedy_assignment(positions, flow)
+        improved = two_opt_improvement(positions, flow, greedy)
+        avg_greedy = evaluate_assignment(greedy, positions, flow)["avg_distance_per_move"]
+        avg_improved = evaluate_assignment(improved, positions, flow)["avg_distance_per_move"]
+        deltas.append(avg_greedy - avg_improved)
+    assert sum(deltas) / len(deltas) > 0.0
+
+
+def test_two_opt_handles_zero_and_one_door():
+    for n in (0, 1):
+        positions, flow, hots = generate_doors_and_flow(n, seed=1)
+        start = sequential_assignment(positions, flow)
+        improved = two_opt_improvement(positions, flow, start)
+        _validate_permutation(improved, n)
 
 
 # --- Visualisierung: Beschriftungslogik ---

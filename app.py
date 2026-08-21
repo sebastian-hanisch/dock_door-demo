@@ -23,11 +23,11 @@ import streamlit as st
 from dock_data import generate_doors_and_flow
 from dock_evaluation import evaluate_assignment, lane_flow_totals
 from dock_feedback import log_feedback
-from dock_heuristics import flow_greedy_assignment, sequential_assignment
+from dock_heuristics import flow_greedy_assignment, sequential_assignment, two_opt_improvement
 from dock_pdf_export import generate_assignment_plan_pdf
 from dock_presets import apply_preset, bounds, init_session_state_defaults, load_permalink_settings, randomize_seed, sync_query_params
 from dock_ui_panel import render_assignment_panel
-from dock_visualization import HALF_WIDTH_PX, HOT_LANE_CAPTION, LABEL_DENSITY_CAPTION, build_hall_figure
+from dock_visualization import HOT_LANE_CAPTION, LABEL_DENSITY_CAPTION, THIRD_WIDTH_PX, build_hall_figure
 
 st.set_page_config(page_title="Tor-Zuordnung Umschlaghalle – Sebastian Hanisch", layout="wide")
 
@@ -139,9 +139,16 @@ if needs_init:
         n_doors, int(seed), hall_width=hall_width, hall_depth=hall_depth,
         flow_concentration=flow_concentration, n_hot_lanes=n_hot_lanes,
     )
+    assignment_greedy = flow_greedy_assignment(positions, flow)
     st.session_state.positions = positions
     st.session_state.flow = flow
     st.session_state.hot_idxs = hot_idxs
+    # Zuordnungen mitcachen statt bei jedem Rerun (z. B. Expander auf-/zuklappen)
+    # neu zu berechnen - bei der Konstruktion vernachlässigbar, bei der
+    # 2-opt-Verbesserung (bis zu ~0.8s bei 40 Toren) sonst spürbar träge.
+    st.session_state.assignment_sequential = sequential_assignment(positions, flow)
+    st.session_state.assignment_greedy = assignment_greedy
+    st.session_state.assignment_two_opt = two_opt_improvement(positions, flow, assignment_greedy)
     st.session_state.gen_key_cache = gen_key
     st.session_state.force_regen = False
 
@@ -159,20 +166,25 @@ with st.expander("📦 Relationen (nicht editierbar – Umschlagvolumen ist an d
     })
     st.dataframe(lanes_df, width="stretch", hide_index=True)
 
-assignment_sequential = sequential_assignment(positions, flow)
-assignment_greedy = flow_greedy_assignment(positions, flow)
+assignment_sequential = st.session_state.assignment_sequential
+assignment_greedy = st.session_state.assignment_greedy
+assignment_two_opt = st.session_state.assignment_two_opt
 
 stats_sequential = evaluate_assignment(assignment_sequential, positions, flow)
 stats_greedy = evaluate_assignment(assignment_greedy, positions, flow)
+stats_two_opt = evaluate_assignment(assignment_two_opt, positions, flow)
 
-# Beste der beiden Methoden fuer die Primaeransicht: geringere durchschnittliche
-# flussgewichtete Distanz je Bewegung gewinnt.
+# Beste der drei Methoden fuer die Primaeransicht: geringere durchschnittliche
+# flussgewichtete Distanz je Bewegung gewinnt. Baseline fuer den Vergleich ist
+# immer die naive Zuordnung nach Ankunftsreihenfolge (nicht "die jeweils
+# andere Methode") - eindeutig definiert, auch jetzt mit drei Kandidaten.
 candidates = [
     {"key": "sequential", "label": "Nach Ankunftsreihenfolge", "assignment": assignment_sequential, **stats_sequential},
     {"key": "greedy", "label": "Fluss-optimiert", "assignment": assignment_greedy, **stats_greedy},
+    {"key": "two_opt", "label": "2-opt-verbessert", "assignment": assignment_two_opt, **stats_two_opt},
 ]
 best = min(candidates, key=lambda c: c["avg_distance_per_move"])
-baseline = next(c for c in candidates if c["key"] != best["key"])
+baseline = next(c for c in candidates if c["key"] == "sequential")
 
 st.markdown("## 🎯 Ihre optimierte Tor-Zuordnung")
 
@@ -183,7 +195,7 @@ if baseline["avg_distance_per_move"] > 0:
 m1, m2 = st.columns(2)
 m1.metric(
     "Ø Distanz je Bewegung", f"{best['avg_distance_per_move']:.1f} m",
-    delta=f"{-reduction_pct:+.1f}% ggü. Alternative", delta_color="inverse",
+    delta=f"{-reduction_pct:+.1f}% ggü. Ankunftsreihenfolge", delta_color="inverse",
 )
 m2.metric("Gewichtete Gesamtdistanz", f"{best['total_weighted_distance']:.0f} m·Bew./Tag")
 
@@ -204,12 +216,12 @@ st.download_button(
     file_name="tor_zuordnungsplan_optimiert.pdf", mime="application/pdf", key="primary_pdf_download",
 )
 
-st.caption("Ermittelt mit der besseren von zwei eigenen Methoden für dieses Szenario. Details unten.")
+st.caption("Ermittelt mit der besten von drei eigenen Methoden für dieses Szenario. Details unten.")
 
 st.markdown("---")
 
 with st.expander("🔧 Wie wir das erreichen – vollständiger Methodenvergleich", expanded=False):
-    tabs = st.tabs(["🔢 Nach Ankunftsreihenfolge", "📈 Fluss-optimiert", "📊 Vergleich"])
+    tabs = st.tabs(["🔢 Nach Ankunftsreihenfolge", "📈 Fluss-optimiert", "🔁 2-opt-verbessert", "📊 Vergleich"])
 
     with tabs[0]:
         st.caption("Relation i erhält Tor i, unabhängig vom Umschlagvolumen - repräsentiert eine ungeplante, historisch gewachsene Zuteilung.")
@@ -220,10 +232,19 @@ with st.expander("🔧 Wie wir das erreichen – vollständiger Methodenvergleic
         summary_greedy = render_assignment_panel("greedy", "Fluss-optimiert", assignment_greedy, positions, flow, hall_width, hall_depth, hot_idxs)
 
     with tabs[2]:
+        st.caption(
+            "Startet bei der fluss-optimierten Zuordnung und tauscht wiederholt zwei Relationen, "
+            "wenn das die Gesamtdistanz senkt, bis keine Verbesserung mehr möglich ist (lokales "
+            "Optimum) - anders als die Konstruktion allein kann dieser Schritt das Ergebnis nie "
+            "verschlechtern, nur verbessern oder gleich lassen."
+        )
+        summary_two_opt = render_assignment_panel("two_opt", "2-opt-verbessert", assignment_two_opt, positions, flow, hall_width, hall_depth, hot_idxs)
+
+    with tabs[3]:
         st.markdown("### Methodenvergleich")
 
         comp_rows = []
-        for c in [summary_sequential, summary_greedy]:
+        for c in [summary_sequential, summary_greedy, summary_two_opt]:
             comp_rows.append({
                 "Methode": c["label"],
                 "Ø Distanz je Bewegung": f"{c['avg_distance_per_move']:.1f} m",
@@ -232,26 +253,25 @@ with st.expander("🔧 Wie wir das erreichen – vollständiger Methodenvergleic
             })
         st.dataframe(pd.DataFrame(comp_rows), width="stretch", hide_index=True)
         st.caption(
-            "Beide Methoden werden mit derselben Bewertungsfunktion gegen dieselbe Flussmatrix "
+            "Alle drei Methoden werden mit derselben Bewertungsfunktion gegen dieselbe Flussmatrix "
             "verglichen - fair vergleichbar, auch wenn die Konstruktionsstrategien sehr unterschiedlich sind."
         )
 
-        vis_col1, vis_col2 = st.columns(2)
-        with vis_col1:
-            st.markdown(f"**{summary_sequential['label']}**")
-            fig_compare_sequential = build_hall_figure(
-                positions, assignment_sequential, flow, hall_width, hall_depth, hot_idxs, width_hint_px=HALF_WIDTH_PX,
-            )
-            st.plotly_chart(fig_compare_sequential, width="stretch", key="compare_sequential_plot")
-        with vis_col2:
-            st.markdown(f"**{summary_greedy['label']}**")
-            fig_compare_greedy = build_hall_figure(
-                positions, assignment_greedy, flow, hall_width, hall_depth, hot_idxs, width_hint_px=HALF_WIDTH_PX,
-            )
-            st.plotly_chart(fig_compare_greedy, width="stretch", key="compare_greedy_plot")
+        vis_col1, vis_col2, vis_col3 = st.columns(3)
+        for col, summary, assignment, key in [
+            (vis_col1, summary_sequential, assignment_sequential, "compare_sequential_plot"),
+            (vis_col2, summary_greedy, assignment_greedy, "compare_greedy_plot"),
+            (vis_col3, summary_two_opt, assignment_two_opt, "compare_two_opt_plot"),
+        ]:
+            with col:
+                st.markdown(f"**{summary['label']}**")
+                fig_compare = build_hall_figure(
+                    positions, assignment, flow, hall_width, hall_depth, hot_idxs, width_hint_px=THIRD_WIDTH_PX,
+                )
+                st.plotly_chart(fig_compare, width="stretch", key=key)
         st.caption(
-            "Gleiche Tor-Positionen und Flussmatrix in beiden Grundrissen - nur die Zuordnung von "
-            f"Relationen zu Toren unterscheidet sich. {HOT_LANE_CAPTION}"
+            "Gleiche Tor-Positionen und Flussmatrix in allen drei Grundrissen - nur die Zuordnung "
+            f"von Relationen zu Toren unterscheidet sich. {HOT_LANE_CAPTION}"
         )
 
 with st.expander("Wie funktioniert diese Demo?"):
@@ -287,17 +307,28 @@ jede weitere Relation wird greedy auf das freie Tor mit der geringsten flussgewi
 zu **allen** bereits platzierten Relationen gesetzt, mit denen sie Fluss hat (nicht nur zum
 gerade bearbeiteten Paarpartner) - ein klassisches Konstruktionsprinzip für das QAP.
 
+**2-opt-Verbesserung:** Startet bei der fluss-optimierten Zuordnung und prüft wiederholt alle
+Paare von Toren: würde ein Tausch der beiden zugeordneten Relationen die Gesamtdistanz senken,
+wird der bestmögliche gefundene Tausch ausgeführt - so lange, bis kein verbessernder Tausch
+mehr existiert (ein lokales Optimum). Das ist der in der QAP-Praxis übliche zweite Schritt nach
+der Konstruktion ("Pairwise Exchange"), berechnet über eine inkrementelle Kostenformel, die pro
+Tauschkandidat nur die tatsächlich betroffenen Terme neu bewertet statt der gesamten Distanz.
+
 **Distanz statt Kosten:** Anders als bei der Tourenplanung-Demo (€/h/CO₂) zählt hier die
 flussgewichtete Durchschnittsdistanz je Bewegung - bewusst ohne künstliche €-Umrechnung, da die
 tatsächliche Kostenwirkung stark vom Betrieb abhängt (Personal, Schichtmodell,
 Flurförderzeug-Typ). Kürzere Wege bedeuten in jedem Betrieb weniger Staplerzeit und mehr
 Durchsatz.
 
-**Keine Optimalitätsgarantie:** Weil QAP - wie oben beschrieben - nicht garantiert effizient
-approximierbar ist, kann die fluss-optimierte Heuristik in einzelnen Szenarien sogar
-schlechter abschneiden als die naive Baseline. Im Durchschnitt über viele Zufallsinstanzen
-liegt sie deutlich vorn (siehe README), aber anders als etwa beim Sternnetz der
-Liniennetz-Design-Demo gibt es hier keine strukturelle Garantie für jeden Einzelfall.
+**Optimalitätsgarantie: teilweise, nicht vollständig.** Weil QAP - wie oben beschrieben - nicht
+garantiert effizient approximierbar ist, kann die fluss-optimierte Konstruktion in einzelnen
+Szenarien sogar schlechter abschneiden als die naive Baseline. Im Durchschnitt über viele
+Zufallsinstanzen liegt sie deutlich vorn (siehe README), aber anders als etwa beim Sternnetz
+der Liniennetz-Design-Demo gibt es hier keine strukturelle Garantie für jeden Einzelfall. Die
+2-opt-Verbesserung hat dagegen eine echte, lokale Garantie: da nur Tausche ausgeführt werden,
+die nachweislich verbessern, kann sie ihr Startergebnis nie verschlechtern - nur ein
+**globales** Optimum ist damit trotzdem nicht garantiert (ein lokales Optimum muss nicht das
+beste aller möglichen Zuordnungen sein).
 
 **In echten Projekten** kämen meist weitere Nebenbedingungen dazu (Torkompatibilität für
 bestimmte Fahrzeugtypen, Zeitfenster je Relation, mehrere Umschlaghallen-Formen statt der hier
@@ -354,12 +385,65 @@ gesuchten Zuordnung ab ($x_{jl}$) - diese Kopplung zweier Variablen im selben Te
 das Problem NP-schwer (Sahni & Gonzalez 1976 zeigten zusätzlich: nicht einmal mit einer
 garantierten Gütegrenze effizient approximierbar, sofern P ≠ NP).
 
+**Fluss-greedy-Konstruktion:** Baut $\pi$ schrittweise auf, in absteigender Reihenfolge der
+Flusswerte $f_{ij}$. Sei $P \subset R \times D$ die Menge der bereits fixierten
+(Relation, Tor)-Zuordnungen zu einem Zeitpunkt während der Konstruktion und $D_{\text{frei}}$
+die Menge der noch freien Tore.
+
+*Start eines neuen Relationspaars* (beide Relationen $i,j$ noch nicht in $P$): wähle das freie
+Torpaar mit der geringsten Distanz zueinander,
+"""
+    )
+    st.latex(r"(k^*, l^*) = \arg\min_{k,l \,\in\, D_{\text{frei}},\; k \neq l} d_{kl}")
+    st.markdown(
+        r"""
+und setze $P \leftarrow P \cup \{(i,k^*), (j,l^*)\}$.
+
+*Erweiterung um eine Relation* $j$ (noch nicht in $P$, ihr aktueller Flusspartner schon):
+wähle das freie Tor mit der geringsten flussgewichteten Distanz zu **allen** bereits
+platzierten Relationen, mit denen $j$ Fluss hat - nicht nur zum aktuellen Paarpartner (siehe
+README, Abschnitt "Ein Konstruktionsfehler..." für die dabei gefundene und korrigierte
+Schwäche der ersten Version, die genau diese Summe auf einen einzelnen Partner verkürzte),
+"""
+    )
+    st.latex(r"d^*(j) = \arg\min_{d \,\in\, D_{\text{frei}}} \; \sum_{(m,k) \,\in\, P} f_{jm} \cdot d_{d,k}")
+    st.markdown(
+        r"""
+Beide Regeln zusammen ergeben nach $n$ Schritten eine vollständige Permutation $\pi$ - eine
+Konstruktionsheuristik im klassischen Sinn: jede Entscheidung wird anhand des aktuellen
+Zwischenstands getroffen und danach nie wieder infrage gestellt, anders als die
+2-opt-Verbesserung im nächsten Abschnitt, die eine bereits fertige Permutation nachträglich
+verbessert.
+
+**Pairwise-Exchange-Nachbarschaft (2-opt):** Ausgehend von einer Permutation $\pi$ lässt sich
+durch Vertauschen der Relationen an zwei Toren $a,b$ eine benachbarte Permutation $\pi'$
+erzeugen. Mit $\rho = \pi^{-1}$ (welche Relation an Tor $a$ sitzt) lässt sich die
+Kostenänderung $\Delta(a,b)$ dieses Tauschs inkrementell berechnen, ohne die Zielfunktion
+komplett neu auszuwerten:
+"""
+    )
+    st.latex(
+        r"\Delta(a,b) = \sum_{k \neq a,b} \big(f_{\rho(b),\rho(k)} - f_{\rho(a),\rho(k)}\big)"
+        r"\big(d_{a,k} - d_{b,k}\big)"
+    )
+    st.markdown(
+        r"""
+- $\Delta(a,b) < 0$: der Tausch verbessert die Zuordnung
+- Aufwand $O(n)$ je Tauschkandidat statt $O(n^2)$ für eine volle Neubewertung - macht die
+  Prüfung aller $\binom{n}{2}$ möglichen Tausche pro Durchlauf ($O(n^3)$ insgesamt) auch bei
+  $n=40$ Toren in Bruchteilen einer Sekunde machbar
+- die 2-opt-Verbesserung führt wiederholt den besten gefundenen Tausch aus (Steepest Descent),
+  bis $\Delta(a,b) \geq 0$ für alle Paare gilt - ein **lokales** Optimum bezüglich dieser
+  Nachbarschaftsstruktur, keine Garantie für das globale Optimum
+
 **Bezug zum Code:** `evaluate_assignment()` in `dock_evaluation.py` berechnet exakt die
-obige Zielfunktion (als Summe über $i<j$ statt der vollen Doppelsumme, da $f_{ij}$
-symmetrisch ist - ergibt denselben Wert). Die beiden Heuristiken in
-`dock_heuristics.py` konstruieren jeweils eine zulässige Permutation $\pi$, ohne das
-Problem exakt zu lösen: bei $n=40$ Toren gäbe es $40! \approx 8 \times 10^{47}$
-mögliche Zuordnungen - vollständige Enumeration ist von vornherein ausgeschlossen.
+Zielfunktion von oben (als Summe über $i<j$ statt der vollen Doppelsumme, da $f_{ij}$
+symmetrisch ist - ergibt denselben Wert). `flow_greedy_assignment()` in `dock_heuristics.py`
+setzt die beiden Konstruktionsregeln von oben um, `_swap_delta()` berechnet
+$\Delta(a,b)$ genau wie oben hergeleitet. Alle drei Verfahren konstruieren bzw. verbessern
+jeweils eine zulässige Permutation $\pi$, ohne das Problem exakt zu lösen: bei $n=40$ Toren
+gäbe es $40! \approx 8 \times 10^{47}$ mögliche Zuordnungen - vollständige Enumeration ist von
+vornherein ausgeschlossen.
 """
     )
 

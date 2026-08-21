@@ -27,10 +27,11 @@ MAX_FLOWS_DRAWN = 40
 # (schmale, tiefe Halle) führte. Jetzt wird die Höhe aus dem tatsächlichen
 # Länge/Tiefe-Verhältnis der aktuellen Parameter abgeleitet, mit einer
 # angenommenen Canvas-Breite (unterschiedlich für volle Breite vs. die
-# nebeneinander stehenden Spalten im Methodenvergleich) und innerhalb
-# sinnvoller Grenzen gekappt.
+# nebeneinander stehenden Spalten im Methodenvergleich, je nach Anzahl der
+# verglichenen Methoden) und innerhalb sinnvoller Grenzen gekappt.
 FULL_WIDTH_PX = 800
 HALF_WIDTH_PX = 380
+THIRD_WIDTH_PX = 250
 MIN_HEIGHT_PX = 260
 MAX_HEIGHT_PX = 700
 

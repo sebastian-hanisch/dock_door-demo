@@ -1,7 +1,7 @@
 """
-Zwei selbst implementierte Heuristiken für das Tor-Zuordnungsproblem (Dock
-Door Assignment): jede Relation (Quelle/Ziel-Kombination) muss genau einem
-Tor zugeordnet werden, mit dem Ziel, die flussgewichtete Transportdistanz
+Selbst implementierte Verfahren für das Tor-Zuordnungsproblem (Dock Door
+Assignment): jede Relation (Quelle/Ziel-Kombination) muss genau einem Tor
+zugeordnet werden, mit dem Ziel, die flussgewichtete Transportdistanz
 innerhalb der Halle zu minimieren.
 
 - sequential_assignment: weist Relationen den Toren schlicht in Reihenfolge
@@ -17,11 +17,33 @@ innerhalb der Halle zu minimieren.
   Zuordnungsproblem (QAP), dem das Tor-Zuordnungsproblem entspricht:
   umschlagstarke Relationen bekommen kurze Wege zueinander.
 
-Beide geben ein Array der Länge n_doors zurück: assignment[d] = Index der
-Relation, die Tor d zugeordnet ist (eine Permutation von 0..n_doors-1).
+- two_opt_improvement: lokale Verbesserung (Pairwise-Exchange) einer
+  bestehenden Zuordnung, typischerweise auf das Ergebnis von
+  flow_greedy_assignment angewendet - der in der QAP-Praxis übliche zweite
+  Schritt nach der Konstruktion (Konstruktion + Verbesserung statt
+  Konstruktion allein). Bleibt im ersten gefundenen lokalen Optimum stecken.
+
+Drei Erweiterungen der 2-opt-Nachbarschaft wurden geprüft und wieder
+verworfen (Details und Zahlen im README): Iterated Local Search (2-opt +
+zufälliges "Schütteln" + Neustarts), eine 3-opt-Nachbarschaft (zyklische
+Dreiertausche) und Taillards Robust-Tabu-Search (dieselbe Tausch-
+Nachbarschaft wie 2-opt, aber auch verschlechternde Tausche erlaubt, um
+lokale Optima zu verlassen). Alle drei brachten in Benchmarks nur
+~0,1-1,1 % zusätzliche Verbesserung gegenüber reinem 2-opt (selbst nach
+Parameter-Tuning ein klares Plateau), bei 40 Toren oft nahe 0 % - bei
+gleichzeitig deutlich höherer Laufzeit. Drei unabhängige Techniken, davon
+eine der stärksten QAP-Metaheuristiken der Literatur, die alle an derselben
+Grenze scheitern, ist ein starkes Indiz: die 2-opt-Lösung ausgehend von der
+Fluss-Konstruktion liegt für diese Art Instanzen bereits nah an einem
+starken, vermutlich oft globalen Optimum.
+
+Alle drei geben ein Array der Länge n_doors zurück: assignment[d] = Index
+der Relation, die Tor d zugeordnet ist (eine Permutation von 0..n_doors-1).
 """
 
 import numpy as np
+
+from dock_constants import EPS
 
 
 def _pairwise_distances(positions):
@@ -98,4 +120,54 @@ def flow_greedy_assignment(positions, flow):
     assignment = np.zeros(n, dtype=int)
     for lane, door in lane_to_door.items():
         assignment[door] = lane
+    return assignment
+
+
+def _swap_delta(assignment, flow, door_dist, a, b):
+    """Kostenänderung, wenn die Relationen an Tor a und Tor b getauscht
+    würden - ohne den Tausch tatsächlich auszuführen und ohne die
+    Gesamtdistanz neu zu berechnen (O(n) statt O(n^2), die inkrementelle
+    Standardformel für Paartausch beim QAP, siehe z. B. Taillards
+    Robust-Taboo-Search-Arbeit). Negativ = Tausch würde verbessern."""
+    lane_a, lane_b = assignment[a], assignment[b]
+    delta = 0.0
+    for k in range(len(assignment)):
+        if k == a or k == b:
+            continue
+        lane_k = assignment[k]
+        delta += (flow[lane_b][lane_k] - flow[lane_a][lane_k]) * (door_dist[a][k] - door_dist[b][k])
+    return delta
+
+
+def two_opt_improvement(positions, flow, assignment, max_passes=200):
+    """Lokale Verbesserung (Pairwise-Exchange/"2-opt" fürs QAP) einer
+    bestehenden Zuordnung: vertauscht wiederholt die Relationen zweier Tore,
+    wenn das die flussgewichtete Gesamtdistanz senkt - je Durchlauf wird das
+    beste gefundene Tauschpaar ausgeführt (Steepest Descent), bis kein
+    verbessernder Tausch mehr existiert (lokales Optimum) oder max_passes
+    erreicht ist (Sicherheitsgrenze gegen Gleitkomma-Zyklen, in der Praxis
+    konvergiert es deutlich früher).
+
+    Anders als die Konstruktionsheuristiken kann dieses Verfahren sein
+    Startergebnis nie verschlechtern - jeder ausgeführte Tausch senkt die
+    Gesamtdistanz garantiert, siehe test_two_opt_never_worsens_the_start."""
+    n = len(assignment)
+    assignment = np.array(assignment, dtype=int, copy=True)
+    if n < 2:
+        return assignment
+
+    door_dist = _pairwise_distances(positions)
+
+    for _ in range(max_passes):
+        best_delta, best_pair = -EPS, None
+        for a in range(n):
+            for b in range(a + 1, n):
+                delta = _swap_delta(assignment, flow, door_dist, a, b)
+                if delta < best_delta:
+                    best_delta, best_pair = delta, (a, b)
+        if best_pair is None:
+            break
+        a, b = best_pair
+        assignment[a], assignment[b] = assignment[b], assignment[a]
+
     return assignment
