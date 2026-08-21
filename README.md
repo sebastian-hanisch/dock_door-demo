@@ -283,12 +283,15 @@ realistischer und visuell nachvollziehbarer als eine reine Linienaufstellung.
   geeignet) - jedes Tor kann jede Relation bedienen.
 - Keine Zeitfenster-/Verspätungsplanung (reines Zuordnungsproblem, keine Zeitkomponente -
   das wäre ein eigenständiges Truck-Appointment-Scheduling-Problem, siehe Anpassungsideen).
-- Kein Metaheuristik-Verfahren (z. B. Simulated Annealing, Tabu Search) - die 2-opt-Lokal-
-  suche (siehe unten) deckt den "Konstruktion + Verbesserung"-Grundgedanken bereits ab,
-  ohne die zusätzlichen Parameter (Temperatur, Abkühlplan, Tabu-Länge) einer Metaheuristik
-  erklären zu müssen. Ursprünglich war hier bewusst auch gegen ein drittes Verfahren
-  entschieden worden ("zwei Methoden mit echtem Charakterunterschied reichen") - auf
-  Nutzerwunsch revidiert, siehe Abschnitt "2-opt-Verbesserung als drittes Verfahren".
+- Kein Metaheuristik-Verfahren in der App (z. B. Simulated Annealing, Tabu Search) - nicht mehr
+  nur eine ungeprüfte Annahme: Tabu Search wurde tatsächlich implementiert und benchmarkt
+  (siehe "Drei geprüfte, aber verworfene Erweiterungen der 2-opt-Nachbarschaft" oben) und
+  brachte gegenüber der deutlich einfacher zu erklärenden 2-opt-Lokalsuche nur ~1 % zusätzliche
+  Verbesserung bei erheblich mehr Laufzeit und Parametern (Tabu-Länge, Iterationszahl) - ein
+  evidenzbasierter, kein nur angenommener Verzicht. Ursprünglich war hier auch bewusst gegen
+  ein drittes Verfahren überhaupt entschieden worden ("zwei Methoden mit echtem
+  Charakterunterschied reichen") - auf Nutzerwunsch revidiert, siehe Abschnitt
+  "2-opt-Verbesserung als drittes Verfahren" oben.
 - Relationen nicht editierbar (Fluss ist an die Generierung gekoppelt), analog zur
   Liniennetz-Design-Demo.
 

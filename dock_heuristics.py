@@ -23,19 +23,25 @@ innerhalb der Halle zu minimieren.
   Schritt nach der Konstruktion (Konstruktion + Verbesserung statt
   Konstruktion allein). Bleibt im ersten gefundenen lokalen Optimum stecken.
 
-Drei Erweiterungen der 2-opt-Nachbarschaft wurden geprüft und wieder
-verworfen (Details und Zahlen im README): Iterated Local Search (2-opt +
-zufälliges "Schütteln" + Neustarts), eine 3-opt-Nachbarschaft (zyklische
-Dreiertausche) und Taillards Robust-Tabu-Search (dieselbe Tausch-
-Nachbarschaft wie 2-opt, aber auch verschlechternde Tausche erlaubt, um
-lokale Optima zu verlassen). Alle drei brachten in Benchmarks nur
-~0,1-1,1 % zusätzliche Verbesserung gegenüber reinem 2-opt (selbst nach
-Parameter-Tuning ein klares Plateau), bei 40 Toren oft nahe 0 % - bei
-gleichzeitig deutlich höherer Laufzeit. Drei unabhängige Techniken, davon
-eine der stärksten QAP-Metaheuristiken der Literatur, die alle an derselben
-Grenze scheitern, ist ein starkes Indiz: die 2-opt-Lösung ausgehend von der
-Fluss-Konstruktion liegt für diese Art Instanzen bereits nah an einem
-starken, vermutlich oft globalen Optimum.
+Mehrere Erweiterungen wurden geprüft und wieder verworfen, weil der
+Zusatznutzen die Mehrkomplexität nicht rechtfertigte (Details und Zahlen im
+README): drei Erweiterungen der 2-opt-Nachbarschaft - Iterated Local Search
+(2-opt + zufälliges "Schütteln" + Neustarts), eine 3-opt-Nachbarschaft
+(zyklische Dreiertausche) und Taillards Robust-Tabu-Search (dieselbe
+Tausch-Nachbarschaft wie 2-opt, aber auch verschlechternde Tausche erlaubt,
+um lokale Optima zu verlassen) - sowie eine Beam-Search-Konstruktion
+(Verallgemeinerung von flow_greedy_assignment: die k besten Teil-Zuordnungen
+parallel statt nur der einen besten). Die drei Nachbarschafts-Erweiterungen
+brachten in Benchmarks nur ~0,1-1,1 % zusätzliche Verbesserung gegenüber
+reinem 2-opt (selbst nach Parameter-Tuning ein klares Plateau), bei 40 Toren
+oft nahe 0 %. Die Beam-Search-Konstruktion war standalone deutlich besser
+als reines Greedy (bis +10,7 % bei 20 Toren), aber dieser Vorsprung
+verdampfte fast vollständig, sobald danach 2-opt angewendet wurde. Vier
+unabhängige Techniken - von zwei entgegengesetzten Seiten angegangen (nach
+der 2-opt-Lösung noch mehr herausholen vs. vor 2-opt besser starten) -, die
+alle an derselben Grenze scheitern, sind ein starkes Indiz: die 2-opt-Lösung
+ausgehend von der Fluss-Konstruktion liegt für diese Art Instanzen bereits
+nah an einem starken, vermutlich oft globalen Optimum.
 
 Alle drei geben ein Array der Länge n_doors zurück: assignment[d] = Index
 der Relation, die Tor d zugeordnet ist (eine Permutation von 0..n_doors-1).

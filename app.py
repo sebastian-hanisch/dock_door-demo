@@ -35,14 +35,16 @@ st.title("🏭 Tor-Zuordnung für die Umschlaghalle")
 st.markdown(
     """
 Interaktive Demo zur Zuordnung von Relationen (Quelle/Ziel-Kombinationen, z. B. Cross-Dock-
-Partner oder Zielgebiete) zu den Toren einer Umschlaghalle. Zwei selbst implementierte Ansätze
-– eine **Zuordnung nach Ankunftsreihenfolge** (unabhängig vom Umschlagvolumen, wie es ohne
-gezielte Planung häufig entsteht) und eine **fluss-optimierte Zuordnung** (umschlagstarke
-Relationen bekommen kurze Wege zueinander) – werden direkt verglichen. Zielgröße ist die
-flussgewichtete Transportdistanz innerhalb der Halle: weniger Weg bedeutet weniger Staplerzeit
-und mehr Durchsatz pro Schicht. Das zugrunde liegende **Dock Door Assignment Problem** ist ein
-Spezialfall des quadratischen Zuordnungsproblems (QAP) und in der Logistik-Literatur gut
-dokumentiert – Hintergrund dazu im Expander "Wie funktioniert diese Demo?" unten.
+Partner oder Zielgebiete) zu den Toren einer Umschlaghalle. Drei selbst implementierte
+Verfahren – eine **Zuordnung nach Ankunftsreihenfolge** (unabhängig vom Umschlagvolumen, wie es
+ohne gezielte Planung häufig entsteht), eine **fluss-optimierte Konstruktion** (umschlagstarke
+Relationen bekommen kurze Wege zueinander) und eine **2-opt-Verbesserung** darauf (kann das
+Konstruktionsergebnis nur verbessern, nie verschlechtern) – werden direkt verglichen. Zielgröße
+ist die flussgewichtete Transportdistanz innerhalb der Halle: weniger Weg bedeutet weniger
+Staplerzeit und mehr Durchsatz pro Schicht. Das zugrunde liegende **Dock Door Assignment
+Problem** ist ein Spezialfall des quadratischen Zuordnungsproblems (QAP) und in der
+Logistik-Literatur gut dokumentiert – Hintergrund dazu im Expander "Wie funktioniert diese
+Demo?" unten.
 """
 )
 
