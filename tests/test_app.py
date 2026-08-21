@@ -72,12 +72,33 @@ def test_primary_view_method_attribution_in_caption():
     assert any("drei eigenen Methoden" in c for c in captions)
 
 
-@pytest.mark.parametrize("label", ["Kleine Halle", "Hauptpartner-Halle", "Mehrere Cross-Dock-Partner"])
-def test_presets_apply_without_crash(label):
+def test_primary_view_and_comparison_tab_explain_flow_lines():
+    """Regressionstest für einen gefundenen Bug: die Primäransicht und der
+    Methodenvergleich zeichnen dieselben Flusslinien wie die Detail-Tabs,
+    erklärten aber (anders als diese) nirgends, was Linienbreite/-deckkraft
+    codiert - FLOW_LINE_CAPTION fehlte dort. Muss jetzt an mindestens zwei
+    Stellen erscheinen: Primäransicht und Methodenvergleich."""
+    at = fresh_app()
+    assert_ok(at)
+    captions = [str(c.value) for c in at.caption]
+    flow_line_captions = [c for c in captions if "Linienbreite" in c]
+    assert len(flow_line_captions) >= 2
+
+
+@pytest.mark.parametrize("label,expected_n_doors", [
+    ("Kleine Halle", 8), ("Hauptpartner-Halle", 20), ("Mehrere Cross-Dock-Partner", 28),
+])
+def test_presets_apply_without_crash(label, expected_n_doors):
+    """Prüft neben "keine Exception" auch, dass der Toranzahl-Slider exakt
+    den für dieses Preset erwarteten Wert übernimmt - Regressionsschutz für
+    apply_preset(), das seit einem gefundenen Bug über SETTING_SPECS-Schlüssel
+    statt über eine feste Positionsreihenfolge iteriert; ein vertauschter
+    oder falsch benannter Schlüssel im Preset-Dict würde hier auffallen."""
     at = fresh_app()
     btn = [b for b in at.button if label in b.label][0]
     btn.click().run(timeout=TIMEOUT)
     assert_ok(at)
+    assert at.sidebar.slider(key="n_doors_slider").value == expected_n_doors
 
 
 def test_regenerate_button():
@@ -239,6 +260,50 @@ def test_generate_doors_and_flow_zero_doors_no_crash():
     positions, flow, hots = generate_doors_and_flow(0, seed=1)
     assert positions.shape == (0, 2)
     assert flow.shape == (0, 0)
+
+
+def test_generate_doors_and_flow_hot_hot_pair_gets_boost_once_not_squared():
+    """Regressionstest für einen gefundenen Bug: die Schleife über hot_idxs
+    skalierte Zeile und Spalte jedes Treffers unabhängig, wodurch eine
+    Flusszelle, deren Relationen BEIDE Vorzugsrelationen sind, mit boost²
+    statt boost multipliziert wurde. `base` wird deterministisch über
+    denselben RNG-Aufrufpfad wie generate_doors_and_flow rekonstruiert (erst
+    rng.uniform für base, danach rng.choice für hot_idxs - bei n_hot_lanes=2
+    und n>=2 liefert das immer exakt 2 Vorzugsrelationen), das erwartete
+    Ergebnis exakt vorausberechnet und mit dem tatsächlichen flow verglichen."""
+    seed = 3
+    n = 8
+    flow_concentration = 1.0
+    n_hot_lanes = 2
+
+    rng = np.random.default_rng(seed)
+    base = rng.uniform(1, 10, size=(n, n))
+    base = (base + base.T) / 2
+    hot_idxs_expected = rng.choice(n, size=n_hot_lanes, replace=False)
+    assert len(hot_idxs_expected) == 2
+
+    boost = 1.0 + flow_concentration * 6.0
+    hot_mask = np.zeros(n, dtype=bool)
+    hot_mask[hot_idxs_expected] = True
+    expected_multiplier = np.where(hot_mask[:, None] | hot_mask[None, :], boost, 1.0)
+    expected_flow = base * expected_multiplier
+    np.fill_diagonal(expected_flow, 0.0)
+    expected_flow = expected_flow.round(0)
+
+    positions, flow, hots = generate_doors_and_flow(n, seed=seed, flow_concentration=flow_concentration, n_hot_lanes=n_hot_lanes)
+    assert np.allclose(flow, expected_flow)
+
+    i, j = int(hot_idxs_expected[0]), int(hot_idxs_expected[1])
+    assert flow[i][j] == pytest.approx(round(base[i][j] * boost), abs=1)
+
+
+def test_generate_doors_and_flow_no_hot_lanes_at_zero_concentration():
+    """Regressionstest für einen gefundenen Bug: hot_idxs wurden bisher immer
+    gewählt, auch bei flow_concentration=0, obwohl der Boost dort exakt 1.0
+    ist und die markierten Relationen keinerlei tatsächlichen Flussvorteil
+    haben - irreführend für die ⭐/rote-Tor-Markierung in der UI."""
+    positions, flow, hots = generate_doors_and_flow(10, seed=1, flow_concentration=0.0, n_hot_lanes=2)
+    assert len(hots) == 0
 
 
 # --- Bewertungslogik: handkonstruierte Fälle mit bekanntem Ergebnis ---
@@ -462,7 +527,7 @@ def test_two_opt_handles_zero_and_one_door():
 # mehrfach umgebaut wurde - hier nachgeholt, um Regressionen bei künftigen
 # Anpassungen frühzeitig zu erkennen.
 
-from dock_visualization import FLOW_LINE_CAPTION, MAX_FLOWS_DRAWN, _label_plan, build_hall_figure
+from dock_visualization import FLOW_LINE_CAPTION, FULL_WIDTH_PX, MAX_FLOWS_DRAWN, THIRD_WIDTH_PX, _label_plan, build_hall_figure
 
 
 def _two_row_positions(n_per_row, hall_width, hall_depth=30.0):
@@ -473,22 +538,33 @@ def _two_row_positions(n_per_row, hall_width, hall_depth=30.0):
 
 
 def test_label_plan_empty_is_hidden():
-    assert _label_plan(np.zeros((0, 2)), hall_width=100.0) == "hidden"
+    assert _label_plan(np.zeros((0, 2))) == "hidden"
 
 
 def test_label_plan_full_when_spacious():
-    positions = _two_row_positions(n_per_row=2, hall_width=100.0)  # 50 m Torabstand je Reihe
-    assert _label_plan(positions, hall_width=100.0) == "full"
+    positions = _two_row_positions(n_per_row=4, hall_width=100.0)  # 800/4 = 200px je Tor
+    assert _label_plan(positions, width_hint_px=FULL_WIDTH_PX) == "full"
 
 
 def test_label_plan_compact_when_tight():
-    positions = _two_row_positions(n_per_row=2, hall_width=20.0)  # 10 m Torabstand je Reihe
-    assert _label_plan(positions, hall_width=20.0) == "compact"
+    positions = _two_row_positions(n_per_row=12, hall_width=100.0)  # 800/12 ~= 67px je Tor
+    assert _label_plan(positions, width_hint_px=FULL_WIDTH_PX) == "compact"
 
 
 def test_label_plan_hidden_when_very_tight():
-    positions = _two_row_positions(n_per_row=2, hall_width=8.0)  # 4 m Torabstand je Reihe
-    assert _label_plan(positions, hall_width=8.0) == "hidden"
+    positions = _two_row_positions(n_per_row=25, hall_width=100.0)  # 800/25 = 32px je Tor
+    assert _label_plan(positions, width_hint_px=FULL_WIDTH_PX) == "hidden"
+
+
+def test_label_plan_depends_on_actual_render_width_not_hall_width():
+    """Regressionstest für einen gefundenen Bug: _label_plan bewertete die
+    Crowding-Gefahr vorher rein anhand des Torabstands in Metern und ignorierte
+    width_hint_px komplett - dieselbe Toranzahl/Halle wurde in der schmalen
+    Vergleichs-Spalte (THIRD_WIDTH_PX) genauso wie in der vollen Breite
+    beurteilt, obwohl dort viel weniger Pixel je Tor zur Verfügung stehen."""
+    positions = _two_row_positions(n_per_row=8, hall_width=100.0)
+    assert _label_plan(positions, width_hint_px=FULL_WIDTH_PX) == "full"     # 800/8 = 100px
+    assert _label_plan(positions, width_hint_px=THIRD_WIDTH_PX) == "hidden"  # 250/8 = 31px
 
 
 def test_build_hall_figure_annotation_count_matches_label_plan():
@@ -497,10 +573,13 @@ def test_build_hall_figure_annotation_count_matches_label_plan():
     flow = np.zeros((n, n))
     assignment = np.arange(n)
 
-    fig_full = build_hall_figure(positions, assignment, flow, hall_width=100.0, hall_depth=30.0)
+    fig_full = build_hall_figure(positions, assignment, flow, hall_width=100.0, hall_depth=30.0, width_hint_px=800)
     assert len(fig_full.layout.annotations) == n
 
-    fig_hidden = build_hall_figure(positions, assignment, flow, hall_width=8.0, hall_depth=30.0)
+    # Gleiche Positionen/Halle, aber winzige Canvas-Breite - vor dem Fix
+    # wäre width_hint_px hier folgenlos gewesen und die Labels wären trotzdem
+    # erschienen (und dort überlappt).
+    fig_hidden = build_hall_figure(positions, assignment, flow, hall_width=100.0, hall_depth=30.0, width_hint_px=60)
     assert len(fig_hidden.layout.annotations) == 0
 
 
@@ -550,15 +629,15 @@ def test_figure_height_stays_within_bounds():
 
 
 def test_figure_height_smaller_width_hint_gives_smaller_height():
-    """Die Vergleichsansicht rendert zwei Grundrisse nebeneinander (halbe
-    Breite) - bei gleichem Hallen-Seitenverhältnis muss der width_hint_px-
-    Parameter das direkt in eine kleinere Höhe übersetzen, sonst wäre der
-    Halb-Spalten-Grundriss unnötig hoch/gestaucht."""
-    from dock_visualization import HALF_WIDTH_PX, _figure_height
+    """Die Vergleichsansicht rendert drei Grundrisse nebeneinander (je ein
+    Drittel der Breite) - bei gleichem Hallen-Seitenverhältnis muss der
+    width_hint_px-Parameter das direkt in eine kleinere Höhe übersetzen,
+    sonst wäre der Drittel-Spalten-Grundriss unnötig hoch/gestaucht."""
+    from dock_visualization import _figure_height
 
-    full = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=800)
-    half = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=HALF_WIDTH_PX)
-    assert half < full
+    full = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=FULL_WIDTH_PX)
+    third = _figure_height(hall_width=100.0, hall_depth=30.0, width_hint_px=THIRD_WIDTH_PX)
+    assert third < full
 
 
 def test_flow_line_caption_references_actual_constant_not_hardcoded_number():
@@ -593,3 +672,28 @@ def test_feedback_log_and_count_roundtrip(tmp_path):
     assert log_feedback("down", log_file) is True
     assert log_feedback("up", log_file) is True
     assert get_feedback_counts(log_file) == (2, 1)
+
+
+def test_log_feedback_returns_false_on_write_failure(tmp_path):
+    """Regressionstest für einen gefundenen Bug: app.py zeigte bisher immer
+    'Danke für Ihr Feedback!' an, ohne den Rückgabewert von log_feedback zu
+    prüfen - auf einem nicht schreibbaren Pfad (z. B. nicht-persistentes
+    Dateisystem, siehe dock_feedback.py-Docstring) wurde ein Fehlschlag
+    dadurch verschwiegen. log_feedback selbst fängt die Exception bereits ab
+    und muss in diesem Fall False zurückgeben, statt sie zu werfen."""
+    from dock_feedback import log_feedback
+
+    unwritable_path = str(tmp_path / "nonexistent_subdir" / "feedback.csv")
+    assert log_feedback("up", unwritable_path) is False
+
+
+def test_feedback_success_view_shows_aggregate_counts():
+    """Regressionstest für einen gefundenen Bug: get_feedback_counts() war
+    implementiert und getestet, wurde aber in app.py nie aufgerufen - die
+    gesammelten Stimmen wurden nirgends angezeigt."""
+    at = fresh_app()
+    up = [b for b in at.button if b.key == "feedback_up_btn"][0]
+    up.click().run(timeout=TIMEOUT)
+    assert_ok(at)
+    captions = [str(c.value) for c in at.caption]
+    assert any("Bisherige Stimmen" in c for c in captions)

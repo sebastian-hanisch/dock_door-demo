@@ -22,12 +22,12 @@ import streamlit as st
 
 from dock_data import generate_doors_and_flow
 from dock_evaluation import evaluate_assignment, lane_flow_totals
-from dock_feedback import log_feedback
+from dock_feedback import get_feedback_counts, log_feedback
 from dock_heuristics import flow_greedy_assignment, sequential_assignment, two_opt_improvement
 from dock_pdf_export import generate_assignment_plan_pdf
 from dock_presets import apply_preset, bounds, init_session_state_defaults, load_permalink_settings, randomize_seed, sync_query_params
 from dock_ui_panel import render_assignment_panel
-from dock_visualization import HOT_LANE_CAPTION, LABEL_DENSITY_CAPTION, THIRD_WIDTH_PX, build_hall_figure
+from dock_visualization import FLOW_LINE_CAPTION, HOT_LANE_CAPTION, LABEL_DENSITY_CAPTION, THIRD_WIDTH_PX, build_hall_figure
 
 st.set_page_config(page_title="Tor-Zuordnung Umschlaghalle – Sebastian Hanisch", layout="wide")
 
@@ -53,19 +53,28 @@ preset_col1, preset_col2, preset_col3 = st.columns(3)
 with preset_col1:
     st.button(
         "🏬 Kleine Halle", width="stretch",
-        on_click=apply_preset, args=(8, 50.0, 20.0, 0.3, 1, 6),
+        on_click=apply_preset, args=({
+            "n_doors_slider": 8, "hall_width_slider": 50.0, "hall_depth_slider": 20.0,
+            "flow_concentration_slider": 0.3, "n_hot_lanes_slider": 1, "seed_input": 6,
+        },),
         help="Wenige Tore, Umschlagvolumen eher gleichverteilt über die Relationen.",
     )
 with preset_col2:
     st.button(
         "⭐ Hauptpartner-Halle", width="stretch",
-        on_click=apply_preset, args=(20, 120.0, 35.0, 0.85, 1, 12),
+        on_click=apply_preset, args=({
+            "n_doors_slider": 20, "hall_width_slider": 120.0, "hall_depth_slider": 35.0,
+            "flow_concentration_slider": 0.85, "n_hot_lanes_slider": 1, "seed_input": 12,
+        },),
         help="Ein dominanter Cross-Dock-Partner mit deutlich höherem Umschlagvolumen als alle anderen Relationen.",
     )
 with preset_col3:
     st.button(
         "🔀 Mehrere Cross-Dock-Partner", width="stretch",
-        on_click=apply_preset, args=(28, 160.0, 40.0, 0.6, 4, 10),
+        on_click=apply_preset, args=({
+            "n_doors_slider": 28, "hall_width_slider": 160.0, "hall_depth_slider": 40.0,
+            "flow_concentration_slider": 0.6, "n_hot_lanes_slider": 4, "seed_input": 10,
+        },),
         help="Größere Halle mit mehreren umschlagstarken Relationen statt nur einer.",
     )
 
@@ -145,12 +154,23 @@ if needs_init:
     st.session_state.positions = positions
     st.session_state.flow = flow
     st.session_state.hot_idxs = hot_idxs
-    # Zuordnungen mitcachen statt bei jedem Rerun (z. B. Expander auf-/zuklappen)
-    # neu zu berechnen - bei der Konstruktion vernachlässigbar, bei der
-    # 2-opt-Verbesserung (bis zu ~0.8s bei 40 Toren) sonst spürbar träge.
+    # Zuordnungen, Kennzahlen und PDFs mitcachen statt bei jedem Rerun (z. B.
+    # Expander auf-/zuklappen, Feedback-Button) neu zu berechnen - bei der
+    # Konstruktion vernachlässigbar, bei der 2-opt-Verbesserung (bis zu
+    # ~0.8s bei 40 Toren) und beim PDF-Export (4x pro Rerun ohne Cache)
+    # sonst spürbar träge.
     st.session_state.assignment_sequential = sequential_assignment(positions, flow)
     st.session_state.assignment_greedy = assignment_greedy
     st.session_state.assignment_two_opt = two_opt_improvement(positions, flow, assignment_greedy)
+
+    st.session_state.stats_sequential = evaluate_assignment(st.session_state.assignment_sequential, positions, flow)
+    st.session_state.stats_greedy = evaluate_assignment(assignment_greedy, positions, flow)
+    st.session_state.stats_two_opt = evaluate_assignment(st.session_state.assignment_two_opt, positions, flow)
+
+    st.session_state.pdf_sequential = generate_assignment_plan_pdf("Nach Ankunftsreihenfolge", st.session_state.assignment_sequential, positions, flow)
+    st.session_state.pdf_greedy = generate_assignment_plan_pdf("Fluss-optimiert", assignment_greedy, positions, flow)
+    st.session_state.pdf_two_opt = generate_assignment_plan_pdf("2-opt-verbessert", st.session_state.assignment_two_opt, positions, flow)
+
     st.session_state.gen_key_cache = gen_key
     st.session_state.force_regen = False
 
@@ -168,23 +188,41 @@ with st.expander("📦 Relationen (nicht editierbar – Umschlagvolumen ist an d
     })
     st.dataframe(lanes_df, width="stretch", hide_index=True)
 
-assignment_sequential = st.session_state.assignment_sequential
-assignment_greedy = st.session_state.assignment_greedy
-assignment_two_opt = st.session_state.assignment_two_opt
-
-stats_sequential = evaluate_assignment(assignment_sequential, positions, flow)
-stats_greedy = evaluate_assignment(assignment_greedy, positions, flow)
-stats_two_opt = evaluate_assignment(assignment_two_opt, positions, flow)
+# Eine einzige Quelle für die drei Methoden statt separater Listen für
+# Kandidaten, Tabs und Methodenvergleich - ein früherer Aufbau zählte
+# sequential/greedy/two_opt an drei Stellen unabhängig auf, was bei einer
+# künftigen vierten Methode drei synchron zu haltende Stellen bedeutet hätte.
+methods = [
+    {
+        "key": "sequential", "label": "Nach Ankunftsreihenfolge", "tab_label": "🔢 Nach Ankunftsreihenfolge",
+        "assignment": st.session_state.assignment_sequential, "stats": st.session_state.stats_sequential,
+        "pdf": st.session_state.pdf_sequential,
+        "intro": "Relation i erhält Tor i, unabhängig vom Umschlagvolumen - repräsentiert eine ungeplante, historisch gewachsene Zuteilung.",
+    },
+    {
+        "key": "greedy", "label": "Fluss-optimiert", "tab_label": "📈 Fluss-optimiert",
+        "assignment": st.session_state.assignment_greedy, "stats": st.session_state.stats_greedy,
+        "pdf": st.session_state.pdf_greedy,
+        "intro": "Platziert umschlagstarke Relationspaare zuerst auf die jeweils nächstgelegenen freien Tore (siehe README für die Details).",
+    },
+    {
+        "key": "two_opt", "label": "2-opt-verbessert", "tab_label": "🔁 2-opt-verbessert",
+        "assignment": st.session_state.assignment_two_opt, "stats": st.session_state.stats_two_opt,
+        "pdf": st.session_state.pdf_two_opt,
+        "intro": (
+            "Startet bei der fluss-optimierten Zuordnung und tauscht wiederholt zwei Relationen, "
+            "wenn das die Gesamtdistanz senkt, bis keine Verbesserung mehr möglich ist (lokales "
+            "Optimum) - anders als die Konstruktion allein kann dieser Schritt das Ergebnis nie "
+            "verschlechtern, nur verbessern oder gleich lassen."
+        ),
+    },
+]
 
 # Beste der drei Methoden fuer die Primaeransicht: geringere durchschnittliche
 # flussgewichtete Distanz je Bewegung gewinnt. Baseline fuer den Vergleich ist
 # immer die naive Zuordnung nach Ankunftsreihenfolge (nicht "die jeweils
 # andere Methode") - eindeutig definiert, auch jetzt mit drei Kandidaten.
-candidates = [
-    {"key": "sequential", "label": "Nach Ankunftsreihenfolge", "assignment": assignment_sequential, **stats_sequential},
-    {"key": "greedy", "label": "Fluss-optimiert", "assignment": assignment_greedy, **stats_greedy},
-    {"key": "two_opt", "label": "2-opt-verbessert", "assignment": assignment_two_opt, **stats_two_opt},
-]
+candidates = [{"key": m["key"], "label": m["label"], "assignment": m["assignment"], **m["stats"]} for m in methods]
 best = min(candidates, key=lambda c: c["avg_distance_per_move"])
 baseline = next(c for c in candidates if c["key"] == "sequential")
 
@@ -210,9 +248,18 @@ if reduction_pct > 1.0:
 
 fig_best = build_hall_figure(positions, best["assignment"], flow, hall_width, hall_depth, hot_idxs)
 st.plotly_chart(fig_best, width="stretch", key="primary_best_plot")
-st.caption(f"{HOT_LANE_CAPTION} {LABEL_DENSITY_CAPTION}")
+st.caption(f"{HOT_LANE_CAPTION} {FLOW_LINE_CAPTION} {LABEL_DENSITY_CAPTION}")
 
-pdf_bytes_best = generate_assignment_plan_pdf("Optimierte Zuordnung", best["assignment"], positions, flow)
+# "Optimierte Zuordnung" statt des Methodenlabels, damit der generische
+# PDF-Titel unabhängig davon bleibt, welche Methode gerade gewinnt (siehe
+# auch die Primäransicht oben, die den Methodennamen bewusst nicht nennt) -
+# deshalb per (gen_key, best-Methode) gecacht statt die je-Methode-PDFs aus
+# methods[...]['pdf'] wiederzuverwenden, die einen anderen Titel tragen.
+best_pdf_cache_key = (gen_key, best["key"])
+if st.session_state.get("best_pdf_cache_key") != best_pdf_cache_key:
+    st.session_state.pdf_bytes_best = generate_assignment_plan_pdf("Optimierte Zuordnung", best["assignment"], positions, flow)
+    st.session_state.best_pdf_cache_key = best_pdf_cache_key
+pdf_bytes_best = st.session_state.pdf_bytes_best
 st.download_button(
     "📄 Tor-Zuordnungsplan als PDF herunterladen", data=pdf_bytes_best,
     file_name="tor_zuordnungsplan_optimiert.pdf", mime="application/pdf", key="primary_pdf_download",
@@ -223,57 +270,43 @@ st.caption("Ermittelt mit der besten von drei eigenen Methoden für dieses Szena
 st.markdown("---")
 
 with st.expander("🔧 Wie wir das erreichen – vollständiger Methodenvergleich", expanded=False):
-    tabs = st.tabs(["🔢 Nach Ankunftsreihenfolge", "📈 Fluss-optimiert", "🔁 2-opt-verbessert", "📊 Vergleich"])
+    tabs = st.tabs([m["tab_label"] for m in methods] + ["📊 Vergleich"])
 
-    with tabs[0]:
-        st.caption("Relation i erhält Tor i, unabhängig vom Umschlagvolumen - repräsentiert eine ungeplante, historisch gewachsene Zuteilung.")
-        summary_sequential = render_assignment_panel("sequential", "Nach Ankunftsreihenfolge", assignment_sequential, positions, flow, hall_width, hall_depth, hot_idxs)
+    summaries = {}
+    for m, tab in zip(methods, tabs[:-1]):
+        with tab:
+            st.caption(m["intro"])
+            summaries[m["key"]] = render_assignment_panel(
+                m["key"], m["label"], m["assignment"], positions, flow, hall_width, hall_depth, hot_idxs,
+                m["stats"], m["pdf"],
+            )
 
-    with tabs[1]:
-        st.caption("Platziert umschlagstarke Relationspaare zuerst auf die jeweils nächstgelegenen freien Tore (siehe README für die Details).")
-        summary_greedy = render_assignment_panel("greedy", "Fluss-optimiert", assignment_greedy, positions, flow, hall_width, hall_depth, hot_idxs)
-
-    with tabs[2]:
-        st.caption(
-            "Startet bei der fluss-optimierten Zuordnung und tauscht wiederholt zwei Relationen, "
-            "wenn das die Gesamtdistanz senkt, bis keine Verbesserung mehr möglich ist (lokales "
-            "Optimum) - anders als die Konstruktion allein kann dieser Schritt das Ergebnis nie "
-            "verschlechtern, nur verbessern oder gleich lassen."
-        )
-        summary_two_opt = render_assignment_panel("two_opt", "2-opt-verbessert", assignment_two_opt, positions, flow, hall_width, hall_depth, hot_idxs)
-
-    with tabs[3]:
+    with tabs[-1]:
         st.markdown("### Methodenvergleich")
 
-        comp_rows = []
-        for c in [summary_sequential, summary_greedy, summary_two_opt]:
-            comp_rows.append({
-                "Methode": c["label"],
-                "Ø Distanz je Bewegung": f"{c['avg_distance_per_move']:.1f} m",
-                "Gewichtete Gesamtdistanz": f"{c['total_weighted_distance']:.0f} m·Bew./Tag",
-                "Gesamtvolumen": f"{c['total_flow']:.0f} Bew./Tag",
-            })
+        comp_rows = [{
+            "Methode": summaries[m["key"]]["label"],
+            "Ø Distanz je Bewegung": f"{summaries[m['key']]['avg_distance_per_move']:.1f} m",
+            "Gewichtete Gesamtdistanz": f"{summaries[m['key']]['total_weighted_distance']:.0f} m·Bew./Tag",
+            "Gesamtvolumen": f"{summaries[m['key']]['total_flow']:.0f} Bew./Tag",
+        } for m in methods]
         st.dataframe(pd.DataFrame(comp_rows), width="stretch", hide_index=True)
         st.caption(
             "Alle drei Methoden werden mit derselben Bewertungsfunktion gegen dieselbe Flussmatrix "
             "verglichen - fair vergleichbar, auch wenn die Konstruktionsstrategien sehr unterschiedlich sind."
         )
 
-        vis_col1, vis_col2, vis_col3 = st.columns(3)
-        for col, summary, assignment, key in [
-            (vis_col1, summary_sequential, assignment_sequential, "compare_sequential_plot"),
-            (vis_col2, summary_greedy, assignment_greedy, "compare_greedy_plot"),
-            (vis_col3, summary_two_opt, assignment_two_opt, "compare_two_opt_plot"),
-        ]:
+        vis_cols = st.columns(len(methods))
+        for col, m in zip(vis_cols, methods):
             with col:
-                st.markdown(f"**{summary['label']}**")
+                st.markdown(f"**{summaries[m['key']]['label']}**")
                 fig_compare = build_hall_figure(
-                    positions, assignment, flow, hall_width, hall_depth, hot_idxs, width_hint_px=THIRD_WIDTH_PX,
+                    positions, m["assignment"], flow, hall_width, hall_depth, hot_idxs, width_hint_px=THIRD_WIDTH_PX,
                 )
-                st.plotly_chart(fig_compare, width="stretch", key=key)
+                st.plotly_chart(fig_compare, width="stretch", key=f"compare_{m['key']}_plot")
         st.caption(
-            "Gleiche Tor-Positionen und Flussmatrix in allen drei Grundrissen - nur die Zuordnung "
-            f"von Relationen zu Toren unterscheidet sich. {HOT_LANE_CAPTION}"
+            "Gleiche Tor-Positionen und Flussmatrix in allen drei Grundrissen - nur die Zuordnung von "
+            f"Relationen zu Toren unterscheidet sich. {HOT_LANE_CAPTION} {FLOW_LINE_CAPTION}"
         )
 
 with st.expander("Wie funktioniert diese Demo?"):
@@ -455,17 +488,30 @@ st.markdown("#### War diese Demo hilfreich für Sie?")
 if st.session_state.get("feedback_given"):
     vote_text = "👍 positiv" if st.session_state["feedback_given"] == "up" else "👎 negativ"
     st.success(f"Danke für Ihr Feedback ({vote_text})! 🙏")
+    up_count, down_count = get_feedback_counts()
+    if up_count + down_count > 0:
+        st.caption(f"Bisherige Stimmen: {up_count} 👍 / {down_count} 👎")
+elif st.session_state.get("feedback_error"):
+    st.warning("⚠️ Ihr Feedback konnte nicht gespeichert werden. Bitte versuchen Sie es später erneut.")
 else:
     fb_col1, fb_col2 = st.columns(2)
     with fb_col1:
         if st.button("👍 Ja", key="feedback_up_btn", width="stretch"):
-            log_feedback("up")
-            st.session_state["feedback_given"] = "up"
+            # Rückgabewert prüfen statt "Danke" blind anzuzeigen: log_feedback
+            # fängt Schreibfehler ab (siehe dock_feedback.py, z. B. nicht-
+            # persistentes Dateisystem auf Streamlit Community Cloud) und
+            # gibt in dem Fall False zurück, ohne eine Exception zu werfen.
+            if log_feedback("up"):
+                st.session_state["feedback_given"] = "up"
+            else:
+                st.session_state["feedback_error"] = True
             st.rerun()
     with fb_col2:
         if st.button("👎 Nein", key="feedback_down_btn", width="stretch"):
-            log_feedback("down")
-            st.session_state["feedback_given"] = "down"
+            if log_feedback("down"):
+                st.session_state["feedback_given"] = "down"
+            else:
+                st.session_state["feedback_error"] = True
             st.rerun()
 
 st.caption(

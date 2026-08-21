@@ -268,6 +268,47 @@ fließen nicht zuverlässig in die automatische Bereichsberechnung ein). Im Brow
 `Plotly.relayout()` verifiziert - derselbe Aufruf, den der Autoscale-Button intern macht -:
 Achsenbereich vorher/nachher identisch.
 
+## Code-Review: zwei weitere Korrektheitsfehler gefunden und behoben
+
+Ein gezielter Code-Review (8 unabhängige Prüf-Perspektiven auf den gesamten Code, nicht nur auf
+einen einzelnen Change) förderte zwei echte Korrektheitsfehler zutage, die keinem der bisherigen
+Tests aufgefallen waren, weil beide erst bei bestimmten Parameterkombinationen sichtbar werden:
+
+**Vorzugsrelationen wurden bei zwei Treffern quadratisch statt linear geboostet.** Die Flussmatrix
+verstärkte Vorzugsrelationen bisher über eine Schleife, die für jeden Treffer in `hot_idxs` sowohl
+dessen Zeile als auch dessen Spalte separat mit `boost` multiplizierte. Bei zwei Vorzugsrelationen
+$i,j$ betraf das dieselbe Zelle $(i,j)$ zweimal - einmal über Relation $i$s Zeile/Spalte, einmal
+über Relation $j$s -, wodurch dieses Relationspaar effektiv mit $\text{boost}^2$ statt $\text{boost}$
+skaliert wurde (bei `flow_concentration=1.0` also 49x statt der beabsichtigten 7x). Der Regler
+"Konzentration auf Vorzugsrelationen" erzeugte dadurch bei mehreren Vorzugsrelationen ein deutlich
+extremeres Szenario, als sein Wert vermuten ließ. Fix: `multiplier` wird jetzt über eine boolesche
+Hot-Maske gebildet (`hot_mask[:, None] | hot_mask[None, :]`) - jede Zelle, die mindestens eine
+Vorzugsrelation betrifft, bekommt `boost` genau einmal. Regressionstest rekonstruiert `base`
+deterministisch über denselben RNG-Aufrufpfad und vergleicht das Ergebnis exakt:
+`test_generate_doors_and_flow_hot_hot_pair_gets_boost_once_not_squared`.
+
+**Beschriftungsdichte wertete den realen Torabstand in Metern statt der tatsächlichen
+Canvas-Breite in Pixeln aus.** `_label_plan()` entschied "voll"/"kompakt"/"ausgeblendet" bisher
+allein anhand `hall_width / Toren je Reihe` - unabhängig davon, ob die Grafik mit voller Breite
+(Primäransicht, 800px) oder als eine von drei nebeneinander stehenden Spalten im Methodenvergleich
+(THIRD_WIDTH_PX, 250px) gerendert wurde. Dieselbe Toranzahl konnte dadurch in der schmalen
+Vergleichs-Spalte als "voll" statt "kompakt"/"ausgeblendet" eingestuft werden und dort trotz der
+in einem früheren Fund eigens gebauten Anti-Überlappungs-Logik überlappen. Fix: die Entscheidung
+läuft jetzt allein über verfügbare Pixel je Tor (`width_hint_px / Toren je Reihe`) statt über Meter
+- die reale Hallenbreite spielt für die Bildschirm-Crowding korrekterweise keine Rolle mehr, nur
+noch Toranzahl und tatsächliche Renderbreite. Regressionstest:
+`test_label_plan_depends_on_actual_render_width_not_hall_width`.
+
+Zusätzlich im selben Review gefunden und behoben (kleinere Wartungsfunde, keine Kernlogik-Fehler):
+`apply_preset()` nahm sechs positionelle Parameter entgegen statt wie alle anderen Preset-/
+Permalink-Funktionen über `SETTING_SPECS`-Schlüssel zu iterieren (Risiko bei künftiger Umsortierung);
+`evaluate_assignment()` und der PDF-Export wurden bei jedem Rerun bis zu dreifach neu berechnet statt
+wie die Zuordnungen selbst mit dem Szenario zwischengespeichert zu werden; die Caption zur
+Flusslinien-Bedeutung fehlte in der Primäransicht und im Methodenvergleich (nur die Detail-Tabs
+hatten sie); der Rückgabewert von `log_feedback()` wurde verworfen, sodass ein Schreibfehler
+("Danke für Ihr Feedback!") verschwiegen worden wäre; `get_feedback_counts()` war fertig
+implementiert und getestet, aber nirgends aufgerufen.
+
 ## Torgeometrie: zwei gegenüberliegende Reihen
 
 Anders als bei der ursprünglichen Formulierung des Dock-Door-Assignment-Problems (Tore in

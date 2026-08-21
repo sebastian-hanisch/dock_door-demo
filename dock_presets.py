@@ -39,13 +39,19 @@ def bounds(state_key):
     return spec.lo, spec.hi
 
 
-def apply_preset(n_doors_val, width_val, depth_val, flow_conc_val, n_hot_val, seed_val):
-    st.session_state["n_doors_slider"] = n_doors_val
-    st.session_state["hall_width_slider"] = width_val
-    st.session_state["hall_depth_slider"] = depth_val
-    st.session_state["flow_concentration_slider"] = flow_conc_val
-    st.session_state["n_hot_lanes_slider"] = n_hot_val
-    st.session_state["seed_input"] = seed_val
+def apply_preset(values):
+    """values: Dict von SETTING_SPECS-Schlüssel (z. B. 'n_doors_slider') auf
+    den zu setzenden Wert - iteriert wie load_permalink_settings() über
+    SETTING_SPECS statt sich auf eine feste Positionsreihenfolge zu
+    verlassen. Eine frühere Version nahm sechs positionelle Parameter
+    entgegen; eine künftige Umsortierung oder Erweiterung von SETTING_SPECS
+    hätte dort stillschweigend falsche Werte zugewiesen, ohne dass ein Test
+    das erkannt hätte."""
+    unknown = set(values) - set(SETTING_SPECS)
+    assert not unknown, f"Unbekannte Preset-Schlüssel (kein Eintrag in SETTING_SPECS): {unknown}"
+    for state_key in SETTING_SPECS:
+        if state_key in values:
+            st.session_state[state_key] = values[state_key]
     st.session_state["force_regen"] = True
 
 

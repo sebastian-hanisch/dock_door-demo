@@ -43,14 +43,22 @@ def generate_doors_and_flow(n_doors, seed, hall_width=100.0, hall_depth=30.0,
     base = rng.uniform(1, 10, size=(n_doors, n_doors))
     base = (base + base.T) / 2  # symmetrisch machen
 
-    n_hot_eff = max(1, min(n_hot_lanes, n_doors))
-    hot_idxs = rng.choice(n_doors, size=n_hot_eff, replace=False) if n_doors > 0 else np.array([], dtype=int)
+    hot_idxs = np.array([], dtype=int)
+    if n_doors > 0 and flow_concentration > 0:
+        n_hot_eff = max(1, min(n_hot_lanes, n_doors))
+        hot_idxs = rng.choice(n_doors, size=n_hot_eff, replace=False)
 
-    multiplier = np.ones((n_doors, n_doors))
+    # Boost gilt je Relationspaar (i, j) genau einmal, sobald mindestens eine
+    # der beiden Relationen eine Vorzugsrelation ist - nicht additiv/multi-
+    # plikativ für Paare, in denen BEIDE Relationen Vorzugsrelationen sind
+    # (ein früherer Fehler multiplizierte in diesem Fall zweimal mit boost,
+    # da die Schleife über hot_idxs sowohl Zeile als auch Spalte jedes
+    # Treffers separat skalierte - bei zwei Vorzugsrelationen ergab das
+    # boost² statt boost, siehe README).
+    hot_mask = np.zeros(n_doors, dtype=bool)
+    hot_mask[hot_idxs] = True
     boost = 1.0 + flow_concentration * 6.0
-    for h in hot_idxs:
-        multiplier[h, :] *= boost
-        multiplier[:, h] *= boost
+    multiplier = np.where(hot_mask[:, None] | hot_mask[None, :], boost, 1.0)
 
     flow = base * multiplier
     np.fill_diagonal(flow, 0.0)

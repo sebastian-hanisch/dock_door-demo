@@ -30,15 +30,21 @@ MAX_FLOWS_DRAWN = 40
 # nebeneinander stehenden Spalten im Methodenvergleich, je nach Anzahl der
 # verglichenen Methoden) und innerhalb sinnvoller Grenzen gekappt.
 FULL_WIDTH_PX = 800
-HALF_WIDTH_PX = 380
 THIRD_WIDTH_PX = 250
 MIN_HEIGHT_PX = 260
 MAX_HEIGHT_PX = 700
 
-# Schwellenwerte für den mittleren Torabstand je Reihe (Meter), ab denen die
-# Beschriftung verkürzt bzw. ganz ausgeblendet wird.
-LABEL_SPACING_COMPACT = 18.0
-LABEL_SPACING_HIDDEN = 8.0
+# Schwellenwerte für die verfügbaren Pixel je Tor auf der am dichtesten
+# besetzten Wand (Canvas-Breite / Toren je Reihe), ab denen die Beschriftung
+# verkürzt bzw. ganz ausgeblendet wird. Bewusst in Pixeln statt in Metern
+# Torabstand: die Beschriftungsschrift hat eine feste Pixelgröße, ein
+# gefundener Fehler bewertete die Crowding-Gefahr vorher rein anhand des
+# realen Torabstands in Metern, unabhängig von der tatsächlichen Canvas-
+# Breite (volle Breite vs. die schmaleren Spalten im Methodenvergleich) -
+# dieselbe Toranzahl konnte dadurch in einer schmalen Spalte trotzdem als
+# "full" statt "compact"/"hidden" eingestuft werden und überlappte dort.
+LABEL_SPACING_COMPACT_PX = 90.0
+LABEL_SPACING_HIDDEN_PX = 40.0
 
 # Senkrechter Abstand der Beschriftung vom Tor in Pixeln, einheitlich für
 # alle Tore.
@@ -55,15 +61,18 @@ FLOW_LINE_CAPTION = (
     f"max. {MAX_FLOWS_DRAWN} dargestellt)."
 )
 LABEL_DENSITY_CAPTION = (
-    "Bei vielen Toren auf schmaler Hallenlänge wird die Beschriftung automatisch verkürzt bzw. "
-    "ausgeblendet - vollständige Tor-/Relationsnummer immer per Mouseover abrufbar."
+    "Bei vielen Toren wird die Beschriftung automatisch verkürzt bzw. ausgeblendet - "
+    "vollständige Tor-/Relationsnummer immer per Mouseover abrufbar."
 )
 
 
-def _label_plan(positions, hall_width):
+def _label_plan(positions, width_hint_px=FULL_WIDTH_PX):
     """Bestimmt die Kürzungsstufe der Beschriftung ("full"/"compact"/
-    "hidden", einheitlich für die ganze Grafik) anhand des mittleren
-    Torabstands je Reihe (Hallenlänge / Toren je Reihe)."""
+    "hidden", einheitlich für die ganze Grafik) anhand der verfügbaren Pixel
+    je Tor auf der am dichtesten besetzten Wand (width_hint_px / Toren je
+    Reihe) - unabhängig von hall_width, das für die tatsächliche
+    Bildschirm-Crowding nichts hergibt (eine physisch breite Halle in einer
+    schmalen Spalte ist genauso eng wie eine schmale Halle dort)."""
     n = len(positions)
     if n == 0:
         return "hidden"
@@ -72,11 +81,11 @@ def _label_plan(positions, hall_width):
     y_min = float(y_vals.min())
     row_a_count = int((y_vals <= y_min + 1e-6).sum())
     row_b_count = n - row_a_count
-    spacing = hall_width / max(row_a_count, row_b_count, 1)
+    spacing_px = width_hint_px / max(row_a_count, row_b_count, 1)
 
-    if spacing < LABEL_SPACING_HIDDEN:
+    if spacing_px < LABEL_SPACING_HIDDEN_PX:
         return "hidden"
-    elif spacing < LABEL_SPACING_COMPACT:
+    elif spacing_px < LABEL_SPACING_COMPACT_PX:
         return "compact"
     return "full"
 
@@ -155,7 +164,7 @@ def build_hall_figure(positions, assignment, flow, hall_width, hall_depth, hot_l
 
     if n > 0:
         y_min = float(positions[:, 1].min())
-        level = _label_plan(positions, hall_width)
+        level = _label_plan(positions, width_hint_px)
         if level != "hidden":
             font_size = 10 if level == "compact" else 12
             for d in range(n):
