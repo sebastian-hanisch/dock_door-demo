@@ -181,4 +181,10 @@ def build_hall_figure(positions, assignment, flow, hall_width, hall_depth, hot_l
         yaxis=dict(autorange=True, title="Hallentiefe (m)", zeroline=False, scaleanchor="x"),
         height=_figure_height(hall_width, hall_depth, width_hint_px), margin=dict(l=10, r=10, t=30, b=10),
     )
+    # fixedrange auf beiden Achsen: verhindert Pinch-Zoom/Drag-Pan im Chart,
+    # damit auf Touch-Geräten stattdessen die Seite normal gescrollt wird
+    # (Hover-Tooltips bleiben davon unberührt; autorange oben ist davon
+    # unabhängig und bestimmt weiterhin die initiale Rahmung).
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     return fig
