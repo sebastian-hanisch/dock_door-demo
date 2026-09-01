@@ -22,7 +22,6 @@ import streamlit as st
 
 from dock_data import generate_doors_and_flow
 from dock_evaluation import evaluate_assignment, lane_flow_totals
-from dock_feedback import get_feedback_counts, log_feedback
 from dock_heuristics import flow_greedy_assignment, sequential_assignment, two_opt_improvement
 from dock_pdf_export import generate_assignment_plan_pdf
 from dock_presets import apply_preset, bounds, init_session_state_defaults, load_permalink_settings, randomize_seed, sync_query_params
@@ -155,7 +154,7 @@ if needs_init:
     st.session_state.flow = flow
     st.session_state.hot_idxs = hot_idxs
     # Zuordnungen, Kennzahlen und PDFs mitcachen statt bei jedem Rerun (z. B.
-    # Expander auf-/zuklappen, Feedback-Button) neu zu berechnen - bei der
+    # Expander auf-/zuklappen) neu zu berechnen - bei der
     # Konstruktion vernachlässigbar, bei der 2-opt-Verbesserung (bis zu
     # ~0.8s bei 40 Toren) und beim PDF-Export (4x pro Rerun ohne Cache)
     # sonst spürbar träge.
@@ -484,38 +483,8 @@ vornherein ausgeschlossen.
 
 st.markdown("---")
 
-st.markdown("#### War diese Demo hilfreich für Sie?")
-if st.session_state.get("feedback_given"):
-    vote_text = "👍 positiv" if st.session_state["feedback_given"] == "up" else "👎 negativ"
-    st.success(f"Danke für Ihr Feedback ({vote_text})! 🙏")
-    up_count, down_count = get_feedback_counts()
-    if up_count + down_count > 0:
-        st.caption(f"Bisherige Stimmen: {up_count} 👍 / {down_count} 👎")
-elif st.session_state.get("feedback_error"):
-    st.warning("⚠️ Ihr Feedback konnte nicht gespeichert werden. Bitte versuchen Sie es später erneut.")
-else:
-    fb_col1, fb_col2 = st.columns(2)
-    with fb_col1:
-        if st.button("👍 Ja", key="feedback_up_btn", width="stretch"):
-            # Rückgabewert prüfen statt "Danke" blind anzuzeigen: log_feedback
-            # fängt Schreibfehler ab (siehe dock_feedback.py, z. B. nicht-
-            # persistentes Dateisystem auf Streamlit Community Cloud) und
-            # gibt in dem Fall False zurück, ohne eine Exception zu werfen.
-            if log_feedback("up"):
-                st.session_state["feedback_given"] = "up"
-            else:
-                st.session_state["feedback_error"] = True
-            st.rerun()
-    with fb_col2:
-        if st.button("👎 Nein", key="feedback_down_btn", width="stretch"):
-            if log_feedback("down"):
-                st.session_state["feedback_given"] = "down"
-            else:
-                st.session_state["feedback_error"] = True
-            st.rerun()
-
 st.caption(
-    "Diese Demo ist Teil des Portfolios von Sebastian Hanisch – Operations Research "
-    "und Machine Learning. Interesse an einer maßgeschneiderten Lösung für Ihr "
-    "Unternehmen? [Kontakt aufnehmen](#)"
+    "Diese Demo ist Teil des Portfolios von [Sebastian Hanisch](https://sebastianhanisch.net) – "
+    "Operations Research und Machine Learning. Interesse an einer maßgeschneiderten Lösung für "
+    "Ihr Unternehmen? [Kontakt aufnehmen](https://sebastianhanisch.net/kontakt.html)"
 )

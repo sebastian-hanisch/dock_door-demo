@@ -135,14 +135,6 @@ def test_pdf_download_buttons_present():
     assert all("PDF" in l for l in labels)
 
 
-def test_feedback_buttons_work():
-    at = fresh_app()
-    up = [b for b in at.button if b.key == "feedback_up_btn"][0]
-    up.click().run(timeout=TIMEOUT)
-    assert_ok(at)
-    assert any("Danke" in str(s.value) for s in at.success)
-
-
 def test_comparison_tab_has_all_three_methods():
     at = fresh_app()
     assert_ok(at)
@@ -659,41 +651,3 @@ def test_generate_assignment_plan_pdf_produces_valid_pdf():
     pdf_bytes = generate_assignment_plan_pdf("Test", assignment, positions, flow)
     assert pdf_bytes[:4] == b"%PDF"
     assert len(pdf_bytes) > 500
-
-
-# --- Feedback ---
-
-def test_feedback_log_and_count_roundtrip(tmp_path):
-    from dock_feedback import get_feedback_counts, log_feedback
-
-    log_file = str(tmp_path / "feedback_test.csv")
-    assert get_feedback_counts(log_file) == (0, 0)
-    assert log_feedback("up", log_file) is True
-    assert log_feedback("down", log_file) is True
-    assert log_feedback("up", log_file) is True
-    assert get_feedback_counts(log_file) == (2, 1)
-
-
-def test_log_feedback_returns_false_on_write_failure(tmp_path):
-    """Regressionstest für einen gefundenen Bug: app.py zeigte bisher immer
-    'Danke für Ihr Feedback!' an, ohne den Rückgabewert von log_feedback zu
-    prüfen - auf einem nicht schreibbaren Pfad (z. B. nicht-persistentes
-    Dateisystem, siehe dock_feedback.py-Docstring) wurde ein Fehlschlag
-    dadurch verschwiegen. log_feedback selbst fängt die Exception bereits ab
-    und muss in diesem Fall False zurückgeben, statt sie zu werfen."""
-    from dock_feedback import log_feedback
-
-    unwritable_path = str(tmp_path / "nonexistent_subdir" / "feedback.csv")
-    assert log_feedback("up", unwritable_path) is False
-
-
-def test_feedback_success_view_shows_aggregate_counts():
-    """Regressionstest für einen gefundenen Bug: get_feedback_counts() war
-    implementiert und getestet, wurde aber in app.py nie aufgerufen - die
-    gesammelten Stimmen wurden nirgends angezeigt."""
-    at = fresh_app()
-    up = [b for b in at.button if b.key == "feedback_up_btn"][0]
-    up.click().run(timeout=TIMEOUT)
-    assert_ok(at)
-    captions = [str(c.value) for c in at.caption]
-    assert any("Bisherige Stimmen" in c for c in captions)
