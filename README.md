@@ -338,6 +338,22 @@ realistischer und visuell nachvollziehbarer als eine reine Linienaufstellung.
 - Relationen nicht editierbar (Fluss ist an die Generierung gekoppelt), analog zur
   Liniennetz-Design-Demo.
 
+## Verwandte Demos mit demselben mathematischen Modell
+
+Verschiedene Themen im Portfolio teilen (fast) dasselbe Modell. Vor einer neuen Demo-Idee deshalb das
+Modell vergleichen, nicht die Kulisse (Stand 2026-09-23):
+
+- **Quadratisches Zuordnungsproblem (QAP):** diese Demo ist der einzige gebaute Vertreter. Jede Idee der Form
+  "N Dinge auf N Plätze, die Kosten hängen von der Nähe der Dinge zueinander ab" ist dasselbe Modell, etwa eine
+  korrelationsbasierte Lagerplatzzuweisung (Artikel, die oft zusammen bestellt werden, nah lagern). Geprüft und als
+  Dopplung verworfen. Die Befunde dieser Demo (2-opt nahe am Optimum, ILS/3-opt/Tabu Search nur ~1 %, exakt nur bis
+  ~10 Tore) gelten deshalb auch dafür.
+- **Einfachere Variante:** hängen die Kosten nur von der Distanz jedes Objekts zu einem festen Punkt ab (z. B.
+  schnelldrehende Artikel nah an die Pickfront), ist es kein QAP mehr, sondern ein lineares Zuordnungsproblem wie in
+  der Matching-Linie (Ungarische Methode).
+- **Cross-Dock-Routing** (siehe "Anpassungsideen") ist strukturell näher am LCL-Routing der `freight_demo`
+  (Packproblem + Standortwahl) als an dieser Demo.
+
 ## 1. Lokal ausführen
 
 ```bash
@@ -374,6 +390,8 @@ pytest tests/ -v
   Konsolidierungslogik (viele Sendungen -> wenige Ausgangstouren). Eher eine fünfte Demo mit
   gemeinsamer Datenbasis als eine Erweiterung dieser hier - andere Kombinatorik (Zuordnung
   vs. Fluss-/Bündelungsproblem).
+  **Einordnung:** strukturell dasselbe Modell wie das LCL-Routing der `freight_demo` (Sendungen bündeln +
+  Anlage wählen), nur mit Toren statt Häfen - deshalb keine eigenständige fünfte Demo (geprüft 2026-09-23).
 - Truck-Appointment-Scheduling (Zeitfenster für Ankunft/Abfahrt) als eigenständiges,
   zeitreihenbasiertes Teilproblem - ergänzt die reine Tor-Zuordnung um die Dimension "wann".
 - Torkompatibilität (nicht jedes Tor für jede Fahrzeuggröße/Ladungsart geeignet) als
