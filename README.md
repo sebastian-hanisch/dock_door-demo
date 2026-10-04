@@ -76,7 +76,7 @@ Zuordnung stets nur anhand der Distanz zum **einen** Relationspartner aus dem ge
 bearbeiteten Paar - nicht anhand der Distanz zu allen bereits platzierten Relationen, mit
 denen die neue Relation ebenfalls Fluss hat. Ergebnis bei einer Stichprobenprüfung über 40
 Zufallsinstanzen (16 Tore, Standardkonfiguration): im Schnitt zwar **8,6 % kürzere** Wege als
-die naive Baseline, aber in einer Instanz (u. a. beim ursprünglich verwendeten Default-Seed
+die naive Baseline (damalige Einmalmessung, mit dem heutigen Code nicht mehr nachstellbar), aber in einer Instanz (u. a. beim ursprünglich verwendeten Default-Seed
 42) schnitt die "optimierte" Methode messbar **schlechter** ab als die Baseline (-0,8 %) -
 ein "schlauerer" Ansatz, der lokal optimierte, aber die Gesamtsituation einer Relation nicht
 berücksichtigte.
@@ -84,8 +84,9 @@ berücksichtigte.
 **Fix:** Die Erweiterungsentscheidung minimiert jetzt die flussgewichtete Summe der Distanzen
 zu **allen** bereits platzierten Relationen, mit denen die neue Relation Fluss hat, statt nur
 zum einzelnen Paarpartner (`flow_greedy_assignment` in `dock_heuristics.py`). Nach dem Fix:
-im Schnitt weiterhin rund 8-9 % kürzere Wege, negative Ausreißer deutlich seltener (1 von 40
-Stichprobeninstanzen). Dass ein Konstruktionsheuristik-Ansatz nicht in **jeder** Einzelinstanz
+neu gemessen mit dem heutigen Code (16 Tore, 100 x 30 m, Konzentration 0,5, 2 Vorzugsrelationen,
+Seeds 0-39) im Schnitt 6,7 % kürzere Wege als die Baseline, negative Ausreißer selten (1 von 40
+Instanzen, -1,3 %); mit anschließender 2-opt-Verbesserung 13,4 % kürzere Wege. Dass ein Konstruktionsheuristik-Ansatz nicht in **jeder** Einzelinstanz
 garantiert besser abschneidet als eine naive Baseline, ist beim quadratischen
 Zuordnungsproblem literaturbekannt (keine Optimalitätsgarantie) - anders als etwa beim
 Sternnetz der Liniennetz-Design-Demo, das strukturell immer 0 % unerreichbar liefert.
