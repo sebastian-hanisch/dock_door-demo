@@ -313,10 +313,10 @@ with st.expander("Wie funktioniert diese Demo?"):
         """
 **Die Problemstellung:** Jede Relation (Quelle/Ziel-Kombination) muss genau einem Tor
 zugeordnet werden, mit dem Ziel, die flussgewichtete Transportdistanz innerhalb der Halle zu
-minimieren - das **Dock Door Assignment Problem**, 1976 von Tsui & Chang formal aufgestellt.
+minimieren - das **Dock Door Assignment Problem**, 1990 von Tsui & Chang formal aufgestellt.
 Es ist ein Spezialfall des **quadratischen Zuordnungsproblems** (QAP): n Objekte auf n
 Standorte verteilen, so dass die Summe aus Fluss × Distanz über alle Paare minimal wird.
-Sahni & Gonzalez zeigten im selben Jahr, dass QAP nicht nur NP-schwer ist, sondern - anders
+Sahni & Gonzalez zeigten schon 1976, dass QAP nicht nur NP-schwer ist, sondern - anders
 als z. B. das Traveling-Salesman-Problem - auch nicht mit einer garantierten Gütegrenze
 effizient approximierbar ist: exakte Lösung ist praktisch nur bis rund 30 Toren machbar,
 danach bleiben nur Heuristiken wie die hier gezeigten.
@@ -485,6 +485,6 @@ st.markdown("---")
 
 st.caption(
     "Diese Demo ist Teil des Portfolios von [Sebastian Hanisch](https://sebastianhanisch.net) – "
-    "Operations Research und Machine Learning. Interesse an einer maßgeschneiderten Lösung für "
-    "Ihr Unternehmen? [Kontakt aufnehmen](https://sebastianhanisch.net/kontakt.html)"
+    "Operations Research und Machine Learning ([Über mich](https://sebastianhanisch.net/ueber-mich.html)). "
+    "Mehr zum Thema: [Lagerlogistik optimieren](https://sebastianhanisch.net/lagerlogistik-optimierung.html)."
 )
